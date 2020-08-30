@@ -1,2 +1,2 @@
-# chives
-Chives is an unopinionated component-based framework for building apps. It's lightweight and flexible.
+# Chives
+Chives is a component-based JavaScript framework for building apps. It's unopinionated, lightweight and flexible. 
