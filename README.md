@@ -1,2 +1,2 @@
-# Chives
-Chives is a component-based JavaScript framework for building apps. It's unopinionated, lightweight and flexible. 
+# Meet Aprikos
+Aprikos is a simple component-based JavaScript framework for building apps. It's unopinionated, lightweight and flexible. 
