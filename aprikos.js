@@ -1213,7 +1213,7 @@
 	function isComplex(item) { return ['object', 'function'].includes(typeof item); }
 
 	/* ---
-	| (UTIL) VAR FORMAT - format braces-based vars i.e. {{foo}} to comment-based vars e.g. <!--chv-var:foo-->
+	| (UTIL) VAR FORMAT - format braces-based vars i.e. {{foo}} to comment-based vars e.g. <!--aprk-var:foo-->
 	--- */
 
 	function varsToCommentVars(str) {
