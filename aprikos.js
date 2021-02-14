@@ -46,7 +46,8 @@
 			liveAttr: /^[\s\S]+\/@[\w\-]+$/,
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
 			condOrRepSelNoReachIntoChildComp: /[A-Z][a-zA-Z\d-]* +[a-zA-Z]/,
-			pseudo: /::?[\w\-]+/
+			pseudo: /::?[\w\-]+/,
+			routeDataVars: /^\$rd:/
 		};
 		regex.varsAsComments = new RegExp(regex.vars.source.replace('\\{\\{', '<!-- ?'+varIdentifier).replace('\\}\\}', ' ?-->').replace('^\\}', '^\\-'), 'g');
 
@@ -716,6 +717,7 @@
 		//...swap out child components for placeholders - parse HTML as shadow XML DOM to help with establishing child comps' parent tags
 		//if we can't find one, means the child component is probably commented out, but still gets picked up by REGEX pattern, obvs.
 		let xml = new DOMParser().parseFromString(html, 'text/xml');
+		if (xml.documentElement.tagName == 'parsererror') return this.error('Invalid markup on HTML template for component "'+compObj.name+'"');
 		html = html.replace(regex.childComps, ($0, compName, props) => {
 			let correspondingXMLNode = xml.querySelector(compName);
 			if (!correspondingXMLNode) return '';
@@ -796,6 +798,10 @@
 
 			//is basic property reference...
 			if (!/[\.\[]/.test(varName)) {
+				
+				//...is route data reference
+				if (regex.routeDataVars.test(varName))
+					return this.activeRoute !== undefined ? (fmFunc || (val => val))(this.routeData[varName.replace(regex.routeDataVars, '')], comp) : '';
 
 				//...if initial sweep and @pool doesn't have its own @varName, leave placeholder in place for reps sweep
 				if (stage == 'init' && !pool.hasOwnProperty(varName)) return match;
@@ -812,7 +818,7 @@
 						default: val = match; break;	
 					}
 				if (val === undefined) return match;
-				if (val && fmFunc) val = fmFunc(val, comp);
+				if (fmFunc) val = fmFunc(val, comp);
 
 				//...if ended up with a primitive, output
 				if (!isComplex(val)) return val;
