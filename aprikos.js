@@ -59,13 +59,13 @@
 	|		@noCache (bool)				- if true, components' file contents won't be cached (dflt: false)
 	|		@compsPath (str)			- path to location of component files (dflt: '.')
 	|		@compsFile (str)			- path to a .html file containing config for all components, rather than each having its own file
-	|		@methods (obj)				- object of filter methods that can be used in var placeholders i.e. {{myvar|mymethod()}}
+	|		@methods (obj)				- object of app-level filter methods that can be used in var placeholders i.e. {{myvar|mymethod()}}. Components can have their
+	|									- own, local @methods, too.
 	|		@autoReprocessAttrs (bool)	- whether to auto-process live attributes whenever ::data is written to (dflt: true)
 	|		@masterComponent (str)		- the name of the master component (dflt: 'master')
-	|		@routes (obj)				- a map of routes data, with keys denoting route IDs and values as objects with route config. See
-	|									  ::listenForRoutes() for more.
-	|		@reinsCaching (bool; arr)	- whether child components should be reinstated from cache rather than fresh when they are reinstated
-	|									  by a parent's reprocessed conditional - true for all components, or an array of component names
+	|		@routes (obj)				- a map of routes data, with keys denoting route IDs and values as objects with route config. See ::listenForRoutes() for more.
+	|		@reinsCaching (bool; arr)	- whether child components should be reinstated from cache rather than fresh when they are reinstated by a parent's reprocessed
+	|									  conditional - true for all components, or an array of component names
 	|		@noCacheCompFiles (bool)	- set true to not cache component files, so they're loaded fresh each time (dflt: false)
 	|		@data (obj)					- an object of starting data, i.e. props for the master component
 	--- */
@@ -96,7 +96,8 @@
 			masterComponent: 'master',
 			container: 'body',
 			manualConds: false,
-			manualAttrs: false
+			manualAttrs: false,
+			methods: {}
 		}, params || {});
 
 		//establish/check app container
@@ -217,7 +218,7 @@
 						case 'css': return content.match(/<style>([\s\S]+?)<\/style>/i);
 						case 'html': return content.match(/(?!<style>)<([a-z][a-z\d]*)[^>]*>[\s\S]*<\/\1>/i);
 						case 'js': return content.match(/<script>([\s\S]*)<\/script>/);
-					}				
+					}
 				})()])),
 				err;
 			if (err = checkCompContent(parts, name)) return this.error(err);
@@ -565,7 +566,9 @@
 			renderTime: new Date(),
 			reRendered: isReRender !== undefined,
 			parent: parentCompObj,
-			app: this
+			app: this,
+			methods: {},
+			master: this.components[this.masterComponent][0]
 		};
 		for (let detail in about) Object.defineProperty(comp, detail, {value: about[detail]});
 
@@ -680,7 +683,7 @@
 
 				//valid request - reprocess comp's attrs/conds/reps
 				if (valid) {
-					!this.manualConds && comp.rc();
+					!this.manualConds && comp.rc(null, 1);
 					!this.manualAttrs & comp.ra();
 
 				//no such state
@@ -725,7 +728,7 @@
 			return '<'+childCompTmpTag+' '+props+' '+compPreRenderAttr+'='+compName.toLowerCase()+'></'+childCompTmpTag+'>';
 		});
 
-		//convert var placeholders to HTML comment form, so they don't render until (and unless)parsed
+		//convert var placeholders to HTML comment form, so they don't render until (and unless) parsed
 		html = varsToCommentVars(html);
 
 		//do initial parsing of vars (we'll do another sweep later, for repeaters)
@@ -790,8 +793,8 @@
 		let val;
 		return str.replace(regex.varsAsComments, (match, varName, filterMethod) => {
 			
-			//run through a filter method?
-			let fmFunc = filterMethod && this.methods && this.methods[filterMethod];
+			//run through a filter method (of the app, or the component)?
+			let fmFunc = filterMethod && (comp.methods[filterMethod] || this.methods[filterMethod]);
 
 			//no data for swaps - retain placeholder
 			if (!pool) return match;
@@ -1043,8 +1046,13 @@
 			//if failed to find route, assume it's a reversion to default route
 			if (!foundRoute) this.activeRoute = undefined;
 
-			//notify any listening components
-			this.fireEvent(null, 'routeChanged');
+			//does the route have an auto data fetch()
+			let dataFetch = !foundRoute || typeof this.routes[this.activeRoute].dataUri != 'function' ?
+				undefined :
+				fetch(this.routes[this.activeRoute].dataUri(this.routeData, this));
+
+			//notify any listening components - feed the data fetch(), if any
+			this.fireEvent(null, 'routeChanged', dataFetch);
 
 		});
 		checkRoutes();
@@ -1106,7 +1114,7 @@
 			get(obj, prop) { return typeof obj[prop] == 'object' && obj[prop] !== null ? new Proxy(obj[prop], outerThis.getProxyConfig(comp)) : obj[prop]; },
 			set(obj, prop, val) {
 				obj[prop] = val;
-				!outerThis.manualConds && comp.rc();
+				!outerThis.manualConds && comp.rc(null, 1);
 				!outerThis.manualAttrs && comp.ra();
 				return true;
 			}
