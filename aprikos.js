@@ -16,17 +16,7 @@
 		noRenderElIdentifier = frameworkAlias+'-no-render:',
 		symbols = [
 			'component',
-			'liveAttrsCache',
-			'repeaterOrigNodes',
-			'events',
-			'compFilesCache',
-			'compDOMsCache',
-			'compJsFuncs',
-			'doneCssForCompNames',
-			'statesCache',
-			'persistentStatesCache',
-			'activeIndexedState',
-			'repData'
+			'repData',
 		].reduce((obj, val) => {
 			obj[val] = Symbol();
 			return obj;
@@ -39,7 +29,7 @@
 		repSelAttr = 'data-'+frameworkAlias+'-rep-sel',
 		regex = {
 			unquotedAttr: /<[a-z]+[^>]* ([a-z][a-z0-9\-_]*)=[^'"][^>]*>/i,
-			childComps: /<([A-Z][a-z\d\-]*)\b([^\/]*) ?\/>/g,
+			childComps: /<([A-Z][a-z\d\-]*)[^>]*>/g,
 			repOrCondChildCompSel: /\b([A-Z][a-z\d\-]*)(?!=["\]])\b/g,
 			vars: /\{\{([^\}\|]+)(?:\|(\w+)\(\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
@@ -56,12 +46,11 @@
 	|	@params (obj)	- object of params, including:
 	|		@container (obj; sel)		- a container for the app, either a reference to an HTML element or a selector string pointing to
 	|									  one (dflt: 'body')
-	|		@noCache (bool)				- if true, components' file contents won't be cached (dflt: false)
 	|		@compsPath (str)			- path to location of component files (dflt: '.')
 	|		@compsFile (str)			- path to a .html file containing config for all components, rather than each having its own file
 	|		@methods (obj)				- object of app-level filter methods that can be used in var placeholders i.e. {{myvar|mymethod()}}. Components can have their
 	|									- own, local @methods, too.
-	|		@autoReprocessAttrs (bool)	- whether to auto-process live attributes whenever ::data is written to (dflt: true)
+	|		@autoReprocess (arr) 		- array of structures that should auto-reprocess as component data written (dflt: ['output', 'attrs'] - 'conds'/'reps' also allowed)
 	|		@masterComponent (str)		- the name of the master component (dflt: 'master')
 	|		@routes (obj)				- a map of routes data, with keys denoting route IDs and values as objects with route config. See ::listenForRoutes() for more.
 	|		@reinsCaching (bool; arr)	- whether child components should be reinstated from cache rather than fresh when they are reinstated by a parent's reprocessed
@@ -76,28 +65,30 @@
 		window[classId].apps = window[classId].apps || [];
 		window[classId].apps.push(this);
 		this.appId = window[classId].apps.length - 1;
-		this[symbols.compFilesCache] = {};
-		this[symbols.compDOMsCache] = window.cache = {};
-		this[symbols.compJsFuncs] = {};
-		this[symbols.doneCssForCompNames] = [];
+		this.compFilesCache = {};
+		this.compDOMsCache = {};
+		this.compJsFuncs = {};
+		this.doneCssForCompNames = [];
 		this.components = {};
-		this[symbols.events] = {
+		this.events = {
 			rendered: {},
 			fullyRendered: {},
 			routeChanged: {},
+			routeFetched: {},
+			routeFetchError: {},
 			message: {}
 		};
 		this.fullyRenderedTracker = {};
 
 		//merge params with defaults and assign to instance
 		Object.assign(this, {
-			autoReprocessAttrs: true,
 			compsPath: '.',
 			masterComponent: 'master',
 			container: 'body',
-			manualConds: false,
+			autoReprocess: ['output', 'attrs'],
 			manualAttrs: false,
-			methods: {}
+			methods: {},
+			routes: {}
 		}, params || {});
 
 		//establish/check app container
@@ -105,15 +96,7 @@
 		if (!(this.container && this.container.tagName)) return this.error('Container is not an element');
 
 		//validate routes
-		const routesIssue = this.validateRoutes();
-		if (routesIssue) return this.error(routesIssue);
-
-		//listen for route changes in a@href attrs via "route:" protocol
-		this.container.addEventListener('click', evt => {
-			if (!evt.target.matches('a[href^="route:"]')) return;
-			evt.preventDefault();
-			this.components[this.masterComponent][0].go(evt.target.getAttribute('href').replace(/^route:/, ''));
-		});
+		if (this.validateRoutes()) return this.error(this.validateRoutes());
 
 		//single components file rather than separate files? Parse and cache. Also handles special scenario of Aprikos playground, where components data
 		//is read from Aprikos.compsContentHook() func.
@@ -122,13 +105,13 @@
 			if (!window[classId].compsContentHook) {
 				const fp = this.compsPath+'/'+this.compsFile.replace(/\.html$/, '')+'.html';
 				fetch(fp)
-					.then(r => { if (r.ok) return r.text(); else throw 'Could not load components from '+fp+' - check path'; })
+					.then(r => { if (r.ok) return r.text(); else throw 'could not load components from '+fp+' - check path'; })
 					.then(content => {
 						if (!regex.compsFileCompMarker.test(content))
 							throw 'components file '+fp+' is not properly formatted - components must be preceded by comment in format <!-- COMPONENT MYCOMPONENTNAME -->';
 						content.replace(regex.compsFileCompMarker, ($0, compName) => {
 							const compContent = content.substr(content.indexOf($0)+$0.length).split(regex.compsFileCompMarker)[0];
-							this[symbols.compFilesCache][compName.toLowerCase()] = compContent;
+							this.compFilesCache[compName.toLowerCase()] = compContent;
 						});
 						res();
 
@@ -138,7 +121,7 @@
 				let content = window[classId].compsContentHook();
 				content && content.replace(regex.compsFileCompMarker, ($0, compName) => {
 					const compContent = content.substr(content.indexOf($0)+$0.length).split(regex.compsFileCompMarker)[0];
-					this[symbols.compFilesCache][compName.toLowerCase()] = compContent;
+					this.compFilesCache[compName.toLowerCase()] = compContent;
 				});
 				content && res();
 			}
@@ -180,7 +163,7 @@
 
 			//get component content, from file or cache - if construc.compsFile, must be declared in central components file
 			let fp = this.compsPath+'/'+name.toLowerCase()+'.html'+(!this.noCacheCompFiles ? '' : '?r='+Math.round(Math.random() * 10000));
-			const content = this[symbols.compFilesCache][name] || (!this.compsFile ? await fetch(fp).then(r => r.ok ? r.text() : null) : null);
+			const content = this.compFilesCache[name] || (!this.compsFile ? await fetch(fp).then(r => r.ok ? r.text() : null) : null);
 			fp = fp.replace(/\?.+$/, '');
 			if (content === null) {
 				let err = 'Could not load component "'+name+'"'+(parentCompObj ? ' from component "'+parentCompObj.name+'"' : '')+' - ';
@@ -190,7 +173,7 @@
 				return this.error(err+'.');
 			} else if (!content)
 				return this.error(fp+' is empty!');
-			this[symbols.compFilesCache][name] = content;
+			this.compFilesCache[name] = content;
 			this.components[name] = this.components[name] || [];
 
 			//component details
@@ -199,7 +182,7 @@
 				compInstanceId = isReRender != undefined ? isReRender : this.components[name].length;
 
 			//if is reinstatement from reprocessing conditionals (e.g. from route change), grab the cached DOM content, nothing to do beyond here
-			if (isReRender === undefined && this[symbols.compDOMsCache][name+'/'+compInstanceId])
+			if (isReRender === undefined && this.compDOMsCache[name+'/'+compInstanceId])
 				return this.reinstateCompFromCache(name, compInstanceId, res);
 
 			//build component object
@@ -208,27 +191,28 @@
 			//re-render? Clear descendant components ahead of them being remade, and clear previously-bound events bindings so not duplicated
 			if (isReRender !== undefined) {
 				this.clearChildComps(comp);
-				for (let evt in this[symbols.events])
-					this[symbols.events][evt][name+'/'+compInstanceId] && delete this[symbols.events][evt][name+'/'+compInstanceId];
+				for (let evt in this.events)
+					this.events[evt][name+'/'+compInstanceId] && delete this.events[evt][name+'/'+compInstanceId];
 			}
 			
 			//extract parts and derive an object with @js, @css and @html parts - only @html is mandatory
 			let parts = Object.fromEntries(['css', 'html', 'js'].map(part => [[part], (() => {
 					switch (part) {
 						case 'css': return content.match(/<style>([\s\S]+?)<\/style>/i);
-						case 'html': return content.match(/(?!<style>)<([a-z][a-z\d]*)[^>]*>[\s\S]*<\/\1>/i);
+						case 'html': return content;
 						case 'js': return content.match(/<script>([\s\S]*)<\/script>/);
 					}
 				})()])),
 				err;
 			if (err = checkCompContent(parts, name)) return this.error(err);
-			parts.html = parts.html[0];
+			['css', 'js'].forEach(part => parts.html = parts.html.replace(parts[part] ? parts[part][0] : null, '').trim());
 
 			//output CSS, where applicable
 			parts.css && this.buildCompCSS(name, parts.css[1]);
 
 			//treat HTML
 			parts.html = this.treatCompHTML(comp, parts.html, props);
+			if (!parts.html) return this.error('Failed to find HTML template for component "'+comp.name+'"');
 
 			//render as HTML - initially into temporary element - which element depends on the component's container tag
 			comp.DOM = document.createElement(idealParentTag(parts.html));
@@ -259,21 +243,21 @@
 			}
 
 			//treat and inject component JS - JS acts on fragment, before render into actual DOM
-			!this[symbols.compJsFuncs][name] && this.buildCompJS(parts.js ? parts.js[1] : null, comp);
-			this[symbols.compJsFuncs][name+'/'+compInstanceId](this);
+			!this.compJsFuncs[name] && this.buildCompJS(parts.js ? parts.js[1] : null, comp);
+			this.compJsFuncs[name+'/'+compInstanceId](this);
 
 			//rendered (minus descendant components) - fire event - also fire route changed event for starting route. Any component listening in on route changed
 			//should be notified of starting route, but its JS runs after starting route established, hence fire manually here.
 			this.fireEvent(comp, 'rendered');
 			this.fireEvent(comp, 'routeChanged');
 			const compAlias = comp;
-			
+		
 			//render child components
 			await this.renderChildComps(comp);
 
 			//cache the component's DOM content where appl. - we may revert to this if it's ever removed by a route change and later reinstated
 			if (this.reinsCaching === true || (this.reinsCaching instanceof Array && this.reinsCaching.includes(name)))
-				this[symbols.compDOMsCache][name+'/'+compInstanceId] = comp.DOM;
+				this.compDOMsCache[name+'/'+compInstanceId] = comp.DOM;
 
 			//rendered (inc descendant components)
 			this.fireEvent(compAlias, 'fullyRendered');
@@ -294,8 +278,8 @@
 	proto.buildCompCSS = function(compName, css) {
 
 		//prep - skip if already done CSS for this component
-		if (!css || this[symbols.doneCssForCompNames].includes(compName)) return;
-		this[symbols.doneCssForCompNames].push(compName);
+		if (!css || this.doneCssForCompNames.includes(compName)) return;
+		this.doneCssForCompNames.push(compName);
 
 		//...prep sheet
 		const sheet = document.createElement('style'),
@@ -335,10 +319,9 @@
 			${code}
 			app.processReps(this);
 			app.processConds(this);
-			app.processAttrs(this);
 		`).bind(compObj);
 		func.compObj = compObj;
-		this[symbols.compJsFuncs][compObj.name+'/'+compObj.instance] = func;
+		this.compJsFuncs[compObj.name+'/'+compObj.instance] = func;
 		return func;
 	}
 
@@ -376,12 +359,12 @@
 				if (tmpltEl.length > 1)
 					return this.error('Repeater selector "'+origSelector+'" targets more than 1 element in component "'+comp.name+'"');
 				if (!tmpltEl.length) return;
-				const com = comp[symbols.repeaterOrigNodes][origSelector] = document.createComment(tmpltEl[0].outerHTML);
+				const com = comp.repeaterOrigNodes[origSelector] = document.createComment(tmpltEl[0].outerHTML);
 				tmpltEl[0].before(com);
 				tmpltEl[0].parentNode.removeChild(tmpltEl[0]);
 				tmpltEl = com;
 			} else
-				tmpltEl = comp[symbols.repeaterOrigNodes][origSelector];
+				tmpltEl = comp.repeaterOrigNodes[origSelector];
 
 			//if reprocess - delete any previous repeater els for this selector
 			if (isReprocess) {
@@ -404,7 +387,7 @@
 
 			//...process
 			repData.forEach((obj, i) => {
-				const tmplt = comp[symbols.repeaterOrigNodes][origSelector].nodeValue,
+				const tmplt = comp.repeaterOrigNodes[origSelector].nodeValue,
 					newHtml = this.parseVars(tmplt, obj, 'reps', comp, i),
 					frag = document.createElement(idealParentTag(newHtml));
 				frag.innerHTML = newHtml;
@@ -420,11 +403,14 @@
 	}
 
 	/* ---
-	| CONDITIONALS - re/process conditionals for a component - either when it is re/rendered, or later when calling ::reprocessConds(). Args:
+	| CONDITIONALS - re/process conditionals for a component. Happens in one of three scenarios:
+	|	1) On component re/render
+	|	2) When component's ::reprocessConds/::rc() method is called
+	|	3) Automatically, as component data written, if @autoReprocess instantiation param array allows
+	| Args:
 	|	@comp (obj) 		- as with ::processReps()
 	|	@isReprocess (bool)	- " " "
 	|	@sel (str)			- " " "
-	|	@flushCache (bool)	- reprocessing only - whether to read live from component DOM rather than cached elements
 	|	@force (bool)		- if element already showing, and reprocess decides it should still show, it's rerendered (normally left unchanged)
 	|						  This means its JS can run again and be fed fresh props.
 	--- */
@@ -486,7 +472,6 @@
 					condEl.replaceWith(com);
 					if (force) this.processConds(comp, isReprocess, sel);
 				}
-
 			});
 
 		}
@@ -497,49 +482,63 @@
 	}
 
 	/* ---
-	| LIVE ATTRIBUTES - as with ::processConds(), but for live attributes. Args:
-	|	@comp (obj)			- the component object
-	|	@isReprocess (bool)	- as with ::processConds()
-	|	@attr (str)			- if reprocess only - the name of attr(s) to reprocess - so not the whole object key, just the part after "/"
-	|	@flushCache (bool)	- as with ::processConds()
+	| OUTPUT VARS - as with ::processConds(), but for output, i.e. variables in free-flowing output. Args:
+	|	@comp (obj)	- the component object.
+	|	@sel (str)	- an optional selector targeting an element within which to process vars (else whole component DOM)
 	--- */
 
-	proto.processAttrs = function(comp, isProcess, attr, flushCache) {
-
-		if (!comp.attrs) return;
-		if (!comp.attrs[symbols.liveAttrsCache]) Object.defineProperty(comp.attrs, symbols.liveAttrsCache, {value: {}});
-
-		//establish conditionals - all, or specific
-		const attrs = !attr ? comp.attrs : (() => {
-			let ret = {};
-			for (let sel in comp.attrs) if (new RegExp('@'+attr+'$').test(sel)) ret[sel] = comp.attrs[sel];
-			return ret;
-		})();
-
-		//iterate over instructions...
-		for (let sel in attrs) {
-
-			//...validate
-			if (!regex.liveAttr.test(sel))
-				return this.error('live attribute "'+sel+'" is not in format "selector/@attr" in component "'+comp.name+'"');
-			if (!['function', 'string', 'number'].includes(typeof attrs[sel]))
-				return this.error('value for live attribute "'+sel+'" is not a function, string or number in component "'+comp.name+'"');
-
-			//...split into selector vs. attribute name
-			let spl = sel.split(/\/@/), els;
-
-			//get elements - live or from cache
-			if (!isProcess || flushCache || !comp.attrs[symbols.liveAttrsCache][sel]) {
-				els = [...comp.DOM.querySelectorAll(spl[0])];
-				if (comp.DOM.matches(spl[0])) els.push(comp.DOM);
-				comp.attrs[symbols.liveAttrsCache][sel] = els; //<-- we have one copy of Aprikos.js where this line is in the else, not the if. ??
-			} else
-				els = comp.attrs[symbols.liveAttrsCache][sel];
-
-			//effect
-			els.forEach(el => {
-				el.setAttribute(spl[1], typeof attrs[sel] == 'function' ? attrs[sel](el) : attrs[sel]);
+	proto.processOutput = function(comp, sel) {
+		for (let which of ['comment', 'text']) {
+			let walker = document.createTreeWalker(!sel ? comp.DOM : comp.DOM.querySelector(sel), NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
+					!!(node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->'))
+				}),
+				nodes = [],
+				node;
+			while (node = walker.nextNode()) nodes.push(node);
+			nodes.forEach(node => {
+				let prop = which == 'comment' ? 'nodeValue' : 'varTmplt',
+					repl = this.parseVars('<!--'+(node[prop])+'-->', comp.data, 'init', comp);
+				if (repl && repl.indexOf('<!--') != 0) {
+					let tn = document.createTextNode(repl);
+					tn.varTmplt = node[prop];
+					node.replaceWith(tn);
+				}
 			});
+		}
+	}
+
+	/* ---
+	| ATTRIBUTE VARS - as with ::processConds(), but for attributes. Args:
+	|	@comp (obj)		- the component object
+	|	@attrType (str)	- for when reprocessing attrs manually; an attr name to target, otherwise all
+	--- */
+
+	proto.processAttrs = function(comp, attrType) {
+
+		//get attrs
+		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
+				acceptNode: node => node.closest('['+compRenderedAttr+']') === comp.DOM && !node.matches('['+compPreRenderAttr+']')
+			}),
+			nodes = [],
+			node,
+			els = [],
+			attrs = [];
+		while (node = walker.nextNode()) {
+			els.push(node);
+			attrs.push.apply(attrs, !attrType ? [...node.attributes] : [...node.attributes].filter(attr => attr.name === attrType));
+		}
+
+		//iterate and do parse vars...
+		for (let attr of attrs) {
+
+			let tmplt;
+			if (attr.varTmplt)
+				tmplt = attr.varTmplt;
+			else if (regex.varsAsComments.test(attr.value))
+				tmplt = attr.varTmplt = attr.value;
+			if (!tmplt) continue;
+
+			attr.value = this.parseVars(tmplt, comp.data, 'init', comp);
 
 		}
 	}
@@ -562,6 +561,7 @@
 		//log details about this comp
 		const about = {
 			name: name,
+			textNodesFromVarCommentTmplts: [],
 			instance: compInstanceId,
 			renderTime: new Date(),
 			reRendered: isReRender !== undefined,
@@ -577,12 +577,12 @@
 		//which works like an undo/redo tree, and a persistent states tree, with named states that can't be lost in the way that indexed
 		//states can (e.g. if you go to state 1, then go back to 0, then make a new state - a new state 1 is created, and the old is lost)
 		comp.activeState = !prevBuild ? 0 : prevBuild.activeState;
-		comp[symbols.activeIndexedState] = !prevBuild ? 0 : prevBuild[symbols.activeIndexedState];
+		comp.activeIndexedState = !prevBuild ? 0 : prevBuild.activeIndexedState;
 
 		//some private, symbol-based stuff
-		comp[symbols.repeaterOrigNodes] = {};
-		comp[symbols.statesCache] = prevBuild ? prevBuild[symbols.statesCache] : [new Proxy(copyObj(comp.data), this.getProxyConfig(comp))];
-		comp[symbols.persistentStatesCache] = prevBuild ? prevBuild[symbols.persistentStatesCache] : {};
+		comp.repeaterOrigNodes = {};
+		comp.statesCache = prevBuild ? prevBuild.statesCache : [new Proxy(copyObj(comp.data), this.getProxyConfig(comp))];
+		comp.persistentStatesCache = prevBuild ? prevBuild.persistentStatesCache : {};
 
 		//add in live collections (via getters) for child/sibling components
 		Object.defineProperties(comp, {
@@ -607,20 +607,21 @@
 				if (comp.name != outerThis.masterComponent) {
 					let frag = document.createElement('div');
 					frag.innerHTML = outerThis.parseVars(comp.DOM._template, comp.parent.data, 'init', comp);
-					let newProps = buildProps(frag.children[0]);
+					let newProps = outerThis.buildProps(frag.children[0], comp);
 					props = Object.assign(props, newProps);
 				}
-				const func = () => this.loadComponent(name, name, props, compInstanceId, parentCompObj);
+				const func = () => this.loadComponent(name, name, props, compInstanceId, parentCompObj, null, comp.DOM._template);
 				outerThis.fullyRenderedTracker[name+'/'+compInstanceId] ? func() : comp.on('fullyRendered', func);
 			},
 
-			//...on {event} (see constr[symbols.events] for valid events) 
+			//...on {event} (see constr.events for valid events) 
 			on: on.bind(comp),
 
 			//...reprocess repeaters/conditionals/live attrs
 			reprocessReps: sel => this.processReps(comp, 1, sel),
-			reprocessConds: (sel, force) => this.processConds(comp, 1, sel, force),
-			reprocessAttrs: (sel, flushCache) => this.processAttrs(comp, 1, sel, flushCache),
+			reprocessConds: sel => this.processConds(comp, 1, sel, 1),
+			reprocessAttrs: (sel, flushCache) => this.processAttrs(comp, sel),
+			reprocessOutput: sel => this.processOutput(comp, sel),
 
 			//...message (another component)
 			message: (xpath, data) => this.compMessage(comp, xpath.toLowerCase(), data),
@@ -635,19 +636,19 @@
 			newState: persist => {
 				const data = new Proxy(copyObj(comp.data), outerThis.getProxyConfig(comp));
 				if (!persist) {
-					comp[symbols.activeIndexedState]++;
-					comp.activeState = comp[symbols.activeIndexedState];
-					comp[symbols.statesCache][comp.activeState] = data;
-					comp[symbols.statesCache] = comp[symbols.statesCache].slice(0, comp.activeState + 1);
+					comp.activeIndexedState++;
+					comp.activeState = comp.activeIndexedState;
+					comp.statesCache[comp.activeState] = data;
+					comp.statesCache = comp.statesCache.slice(0, comp.activeState + 1);
 				} else {
 					comp.activeState = persist;
-					comp[symbols.persistentStatesCache][persist] = data;
+					comp.persistentStatesCache[persist] = data;
 				}
 				return persist || comp.activeState;
 			},
 
 			//...change state - @which is an index or persistent state name. comp.activeState is set to @which (if a persistent state,
-			//an internal tracker, comp[symbols.activeIndexedState], remembers the indexed position (any future 'next'/'prev' will be from
+			//an internal tracker, comp.activeIndexedState, remembers the indexed position (any future 'next'/'prev' will be from
 			//that index)....
 			changeState: which => {
 
@@ -655,10 +656,10 @@
 
 				//...index (int)
 				if (typeof which == 'number') {
-					if (comp[symbols.statesCache][which]) {
-						comp.data = comp[symbols.statesCache][which];
+					if (comp.statesCache[which]) {
+						comp.data = comp.statesCache[which];
 						valid = 1;
-						comp.activeState = comp[symbols.activeIndexedState] = which;
+						comp.activeState = comp.activeIndexedState = which;
 					} else {
 						this.error('no such state for component '+comp.name+'/'+comp.instance+', "'+which+'"');
 						return false;
@@ -666,29 +667,26 @@
 
 				//...index ('next'/'prev' alias)
 				} else if (['next', 'prev'].includes(which)) {
-					which = comp[symbols.activeIndexedState] + (which == 'next' ? 1 : -1);
-					if (comp[symbols.statesCache][which]) {
-						comp.data = comp[symbols.statesCache][which];
+					which = comp.activeIndexedState + (which == 'next' ? 1 : -1);
+					if (comp.statesCache[which]) {
+						comp.data = comp.statesCache[which];
 						valid = 1;
-						comp.activeState = comp[symbols.activeIndexedState] = which;
+						comp.activeState = comp.activeIndexedState = which;
 					}
 				}
 
 				//...persistent state - @activeState will remain where it is - that's for the indexed states cache only
-				else if (comp[symbols.persistentStatesCache][which]) {
+				else if (comp.persistentStatesCache[which]) {
 					valid = 1;
-					comp.data = comp[symbols.persistentStatesCache][which];
+					comp.data = comp.persistentStatesCache[which];
 					comp.activeState = which;
 				}
 
-				//valid request - reprocess comp's attrs/conds/reps
-				if (valid) {
-					!this.manualConds && comp.rc(null, 1);
-					!this.manualAttrs & comp.ra();
+				//valid request - reprocess comp's output/attrs/conds/reps
+				if (valid) this.doAutoReprocess(comp);
 
 				//no such state
-				} else
-					return false;
+				else return false;
 
 			}
 
@@ -698,6 +696,7 @@
 		methods.rc = methods.reprocessConds;
 		methods.ra = methods.reprocessAttrs;
 		methods.rr = methods.reprocessReps;
+		methods.ro = methods.reprocessOutput;
 		for (let method in methods) Object.defineProperty(comp, method, {value: methods[method]});
 
 		return comp;
@@ -717,16 +716,12 @@
 			$1+' '+compRenderedAttr+'="'+compObj.name+'" '+compRenderedInstanceAttr+'="'+compObj.instance+'">'
 		);
 
-		//...swap out child components for placeholders - parse HTML as shadow XML DOM to help with establishing child comps' parent tags
-		//if we can't find one, means the child component is probably commented out, but still gets picked up by REGEX pattern, obvs.
-		let xml = new DOMParser().parseFromString(html, 'text/xml');
-		if (xml.documentElement.tagName == 'parsererror') return this.error('Invalid markup on HTML template for component "'+compObj.name+'"');
-		html = html.replace(regex.childComps, ($0, compName, props) => {
-			let correspondingXMLNode = xml.querySelector(compName);
-			if (!correspondingXMLNode) return '';
-			let childCompTmpTag = childCompTmpTagName(correspondingXMLNode.parentNode.tagName);
-			return '<'+childCompTmpTag+' '+props+' '+compPreRenderAttr+'='+compName.toLowerCase()+'></'+childCompTmpTag+'>';
-		});
+		//add explicit closing tags to child components (most browsers support custom tags via the HTMLUnknownElement interface, but these must be explicitly closed
+		//also transfer component name to identifier attribute
+		html = html.replace(regex.childComps, (match, compName) => match
+			.replace('<'+compName, '<'+compName+' '+compPreRenderAttr+'='+compName.toLowerCase())
+			.replace(/ *\/(?=>$)/, '')
+		+'</'+compName+'>');
 
 		//convert var placeholders to HTML comment form, so they don't render until (and unless) parsed
 		html = varsToCommentVars(html);
@@ -755,13 +750,13 @@
 
 		//grab old component object - it's no longer in this.components, since the component was unrendered when it previously failed a
 		//conditional, but we have a reference to it on the component's JS function
-		const comp = this[symbols.compJsFuncs][name+'/'+instance].compObj;
+		const comp = this.compJsFuncs[name+'/'+instance].compObj;
 
 		//reinstate it in this.components
 		this.components[name][instance] = comp;
 
 		//set its DOM to the cached DOM from when it was last around
-		comp.DOM = this[symbols.compDOMsCache][name+'/'+instance];
+		comp.DOM = this.compDOMsCache[name+'/'+instance];
 
 		//put into DOM
 		const placeholder = this.container.querySelector('['+compPreRenderAttr+'='+name.toLowerCase()+']');
@@ -885,9 +880,9 @@
 					removed++;
 
 					//...and any event refs to it
-					for (let evt in this[symbols.events])
-						for (let compId in this[symbols.events][evt])
-							delete this[symbols.events][evt][compId];
+					for (let evt in this.events)
+						for (let compId in this.events[evt])
+							delete this.events[evt][compId];
 
 				}
 
@@ -910,9 +905,9 @@
 		for (let node of [...comp.DOM.querySelectorAll('['+compPreRenderAttr+']')]) {
 
 			//...prep props
-			const compName = node.getAttribute(compPreRenderAttr),
+			let compName = node.getAttribute(compPreRenderAttr),
 				template = node._template || node.outerHTML,
-				props = buildProps(node);
+				props = this.buildProps(node, comp);
 
 			//render
 			await this.loadComponent(compName, compName, props, undefined, comp, node.getAttribute(repElAttr), template);
@@ -930,13 +925,13 @@
 
 		//prep - locate app: this or, if being called from/in context of component, this.app
 		const errTmplt = 'Missing/invalid {what} passed to on() from component "'+this.name+'"';
-		if (!Object.keys(this.app[symbols.events]).includes(evt)) return this.app.error(errTmplt.replace('{what}', 'event type "'+(evt || '')+'"'));
+		if (!Object.keys(this.app.events).includes(evt)) return this.app.error(errTmplt.replace('{what}', 'event type "'+(evt || '')+'"'));
 		if (typeof cb != 'function') return this.app.error(errTmplt.replace('{what}', 'callback function (for event type "'+evt+'")'));
 
 		//save to events cache
 		let key = this.name+'/'+this.instance;
-		if (!this.app[symbols.events][evt][key]) this.app[symbols.events][evt][key] = [];
-		this.app[symbols.events][evt][key].push(cb);
+		if (!this.app.events[evt][key]) this.app.events[evt][key] = [];
+		this.app.events[evt][key].push(cb);
 
 	}
 
@@ -952,25 +947,31 @@
 		const comps = [comp || Object.values(this.components).flat()].flat();
 		comps.forEach(comp => {
 			const key = comp.name+'/'+comp.instance;
-			this[symbols.events][evt][key] && this[symbols.events][evt][key].forEach(cb => cb.apply(comp, [...arguments].slice(2)));
+			this.events[evt][key] && this.events[evt][key].forEach(cb => cb.apply(comp, [...arguments].slice(2)));
 		});
 	}
 
 	/* ---
-	| ROUTES - VALIDATE - from constructor, validate @routes map, if set. Returns error string if any, else undefined if OK/no routes.
+	| ROUTES - VALIDATE - from constructor, validate @routes map. Returns error string if any, else undefined if OK.
 	--- */
 
 	proto.validateRoutes = function() {
-		if (!this.routes) return;
+
+		//...must be object
 		if (this.routes.toString() != '[object Object]')
-			return '@routes, if specified, must be an object of route IDs to config objects '+this.routes.toString();
-		for (let routeId in this.routes) {
-			const route = this.routes[routeId];
-			if (!routeTypes.includes(route.type))
-				return 'missing or invalid @type property for route "'+routeId+'" - should be "'+routeTypes.join('" or "')+'"';
-			if (route.type == 'seg' && !(route.ptn instanceof RegExp))
-				return 'missing or invalid @ptn (pattern property for route "'+routeId+'" - should be a RegExp pattern';
-		}
+			return '@routes, if specified, must be an object of route IDs to config objects';
+
+		//...check each route (default one, if set, has no @type or @ptn)
+		let err;
+		Object.entries(this.routes).forEach(entry => {
+			if (!routeTypes.includes(entry[1].type))
+				err = 'missing or invalid @type property for route "'+entry[0]+'" - should be "'+routeTypes.join('" or "')+'"';
+			else if (entry[1].type == 'seg' && !(entry[1].ptn instanceof RegExp))
+				err = 'missing or invalid @ptn (pattern property for route "'+entry[0]+'" - should be a RegExp pattern';
+		});
+
+		if (err) return err;
+
 	}
 
 	/* ---
@@ -989,36 +990,30 @@
 		addEventListener('hashchange', checkRoutes = evt => {
 
 			//prep
-			if (!this.routes) return;
 			const hash = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
 			let foundRoute;
 
-			//iterate over routes...
-			for (let routeId in this.routes) {
-				const route = this.routes[routeId];
+			//in some page unload scenarios the hash change event can fire even if there's no actual change; guard against htis
+			if (this.hasOwnProperty('lastHash') && this.lastHash == hash) return;
+			this.lastHash = hash;
 
-				//...validate type
-				if (!['seg', 'json'].includes(route.type)) {
-					this.error('Route "'+routeId+'" does not contain a valid route @type property - must be "seg" (slash-delimited) or "json"');
-					continue;
-				}
+			//iterate over routes (every() ensures we can break from the loop if and when a falsy is returned)...
+			Object.entries(this.routes).every(entry => {
 
 				//...segment-based route...
-				if (route.type == 'seg') {
+				if (entry[1].type == 'seg') {
 
-					//...validate pattern
-					if (!route.ptn || !(route.ptn instanceof RegExp)) {
-						this.error('Route "'+routeId+'" does not have a @ptn (pattern) property or is not a RegExp pattern');
-						continue;
-					}
+					//...validate pattern, unless is default route (which has none)
+					if (!entry[1].ptn || !(entry[1].ptn instanceof RegExp))
+						return this.error('Route "'+entry[0]+'" does not have a @ptn (pattern) property or is not a RegExp pattern');
 
-					const segs = hash.split('/').filter(seg => seg)
+					const segs = hash.split('/').filter(seg => seg);
 
 					//...matches pattern? Gather up data if so
-					if (route.ptn.test(hash)) {
+					if (entry[1].ptn.test(hash)) {
 						foundRoute = 1;
-						const data = route.parts ?
-							route.parts.reduce((acc, val, i) => {
+						const data = entry[1].parts ?
+							entry[1].parts.reduce((acc, val, i) => {
 								acc[val] = segs[i+1];
 								return acc;
 							}, {}) :
@@ -1026,30 +1021,51 @@
 								acc[i] = val;
 								return acc;
 							}, {});
-						this.activeRoute = routeId;
+						this.activeRoute = entry[0];
 						this.routeData = data;
+						return;
 					}
 
 				//...JSON-based route
 				} else {
 					try {
 						const data = JSON.parse(hash);
-						if (!data.route || data.route != routeId) continue;
+						if (!data.route || data.route != routeId) return;
 						foundRoute = 1;
 						delete data.route;
-						this.activeRoute = routeId;
+						this.activeRoute = entry[0];
 						this.routeData = data;
+						return;
 					} catch(e) {}
 				}
-			}
 
-			//if failed to find route, assume it's a reversion to default route
+				return 1; //so every() keeps running
+
+			});
+
+			//if no active route, set active route to undefined
 			if (!foundRoute) this.activeRoute = undefined;
 
-			//does the route have an auto data fetch()
-			let dataFetch = !foundRoute || typeof this.routes[this.activeRoute].dataUri != 'function' ?
-				undefined :
-				fetch(this.routes[this.activeRoute].dataUri(this.routeData, this));
+			//does the route have an auto data fetch()? Fetch if so and fire routeFetched event on resolve (or routeFetchError on failure)
+			let dataFetch;
+			if (foundRoute && this.routes[this.activeRoute].dataUri) {
+				let uri = this.routes[this.activeRoute].lastFetchUri = this.routes[this.activeRoute].dataUri;
+				if (typeof uri == 'function') uri = uri(this.routeData, this);
+				dataFetch = fetch(uri);
+				dataFetch
+					.then(response => {
+						response = response.clone(); //<-- otherwise if user consumes response manually, they'll get an "already consumed" error (bit.ly/3qRYiCb)
+						if (!response.ok) return this.fireEvent(null, 'routeFetchError', response);
+						let mime = response.headers.get('content-type');
+						if (!mime) return response.text();
+						mime = mime.split(/\/|;/)[1];
+						return response[mime] ? response[mime]() : response.text();
+					})
+					.then(data => {
+						this.fetchedRouteData = data;
+						this.fireEvent(null, 'routeFetched', data);
+					});
+			}
 
 			//notify any listening components - feed the data fetch(), if any
 			this.fireEvent(null, 'routeChanged', dataFetch);
@@ -1104,7 +1120,19 @@
 	}
 
 	/* ---
-	| PROXY CONFIG - return a config object for a proxy. Args:
+	| AUTO-REPROCESS - auto-reprocess any construct types allowed by the @autoReprocess instantiation param array - output (template vars), attrs, conds and reps. Args:
+	|	@comp (obj)	- the component object.
+	--- */
+
+	proto.doAutoReprocess = function(comp) {
+		this.autoReprocess.includes('conds') && comp.rc(null, 1);
+		this.autoReprocess.includes('attrs') && comp.ra();
+		this.autoReprocess.includes('reps') && comp.rr();
+		this.autoReprocess.includes('output') && comp.ro();
+	}
+
+	/* ---
+	| PROXY CONFIG - return a config object for a proxy. On data write, auto-reprocess parts allowed by @autoReprocess instantiation params array. Args:
 	|	@comp (obj)	- the component object
 	--- */
 
@@ -1114,8 +1142,7 @@
 			get(obj, prop) { return typeof obj[prop] == 'object' && obj[prop] !== null ? new Proxy(obj[prop], outerThis.getProxyConfig(comp)) : obj[prop]; },
 			set(obj, prop, val) {
 				obj[prop] = val;
-				!outerThis.manualConds && comp.rc(null, 1);
-				!outerThis.manualAttrs && comp.ra();
+				outerThis.doAutoReprocess(comp);
 				return true;
 			}
 		};
@@ -1152,14 +1179,14 @@
 	|	@node (obj)	- a span node representation of a child component template
 	--- */
 
-	function buildProps(node) {
+	proto.buildProps = function(node, comp) {
 		let props = {};
 		[...node.attributes].filter(attr => !/^(_|data-)/.test(attr.name)).forEach(attr => {
 			if (!regex.varsAsComments.test(attr.value)) {
 				const complex = attr.value.match(regex.complexType);
 				props[attr.name] = !complex ? attr.value : complexObjs[complex[1]];
 			} else
-				props[attr.name] = undefined;
+				props[attr.name] = this.parseVars(attr.value, comp.data, 'init', comp);
 		});
 		return props;
 	}
@@ -1202,6 +1229,7 @@
 
 	function idealParentTag(childCompTmplt) {
 		let childCompTag = childCompTmplt.match(/^<(\S+)/);
+		if (!childCompTag) return;
 		switch (childCompTag[1]) {
 			case 'tr': case 'thead': case 'tbody': return 'table';
 			case 'td': return 'tr';
