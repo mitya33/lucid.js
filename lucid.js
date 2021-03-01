@@ -89,7 +89,7 @@
 			manualAttrs: false,
 			methods: {},
 			routes: {},
-			usePushState: 1
+			usePushState: false
 		}, params || {});
 
 		//establish/check app container
