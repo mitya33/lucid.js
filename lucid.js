@@ -22,6 +22,7 @@
 		}, {}),
 		routeTypes = ['seg', 'json'],
 		compPreRenderAttr = 'data-component-name',
+		startUri = location.pathname,
 		compRenderedAttr = 'data-'+frameworkId+'-comp',
 		compRenderedInstanceAttr = 'data-'+frameworkId+'-instance',
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
@@ -87,7 +88,8 @@
 			autoReprocess: ['output', 'attrs'],
 			manualAttrs: false,
 			methods: {},
-			routes: {}
+			routes: {},
+			usePushState: 1
 		}, params || {});
 
 		//establish/check app container
@@ -96,6 +98,13 @@
 
 		//validate routes
 		if (this.validateRoutes()) return this.error(this.validateRoutes());
+
+		//listen for route changes in a@href attrs via "route:" protocol
+		this.container.addEventListener('click', evt => {
+			if (!evt.target.matches('a[href^="route:"]')) return;
+			evt.preventDefault();
+			this.components[this.masterComponent][0].go(evt.target.getAttribute('href').replace(/^route:/, ''));
+		});
 
 		//single components file rather than separate files? Parse and cache. Also handles special scenario of Lucid playground, where components data
 		//is read from Lucid.compsContentHook() func.
@@ -626,9 +635,15 @@
 			message: (xpath, data) => this.compMessage(comp, xpath.toLowerCase(), data),
 
 			//...activate route (or change data of current route) - @data is a segmented list or a JSON string / JS object denoting to the route
-			go: data => {
+			go: this.go = data => {
 				if (!['string', 'object'].includes(typeof data)) return this.error('route change - passed data must be string or object');
-				location.hash = '#/'+(typeof data == 'string' ? data : JSON.stringify(data));
+				let uri = typeof data == 'string' ? data : JSON.stringify(data);
+				if (!this.usePushState)
+					location.assign('#/'+uri);
+				else {
+					history.pushState(null, null, uri);
+					this.checkRoutes();
+				}
 			},
 
 			//...new state - @persist is an optional persistent state name (otherwise indexed state assumed)
@@ -985,11 +1000,10 @@
 	--- */
 
 	proto.listenForRoutes = function() {
-		let checkRoutes;
-		addEventListener('hashchange', checkRoutes = evt => {
+		addEventListener(!this.usePushState ? 'hashchange' : 'popstate', this.checkRoutes = evt => {
 
-			//prep
-			const hash = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
+			//prep - get current hash (or pushstate URI, if using pushstate)
+			const hash = decodeURIComponent(!this.usePushState ? location.hash.replace(/^#\/?/, '') : location.pathname.replace(startUri, ''));
 			let foundRoute;
 
 			//in some page unload scenarios the hash change event can fire even if there's no actual change; guard against htis
@@ -1070,7 +1084,7 @@
 			this.fireEvent(null, 'routeChanged', dataFetch);
 
 		});
-		checkRoutes();
+		this.checkRoutes();
 	}
 
 	/* ---
