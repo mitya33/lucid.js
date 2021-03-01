@@ -1,5 +1,5 @@
 /* -----------
-| APRIKOS.JS
+| LUCID.JS
 | @author: Andy Croxall (mitya.uk; github.com/mitya33)
 ----------- */
 
@@ -8,12 +8,11 @@
 (() => {
 
 	//general framework prep
-	const frameworkId = 'aprikos',
-		frameworkAlias = 'aprk',
+	const frameworkId = 'lucid',
 		classId = frameworkId[0].toUpperCase()+frameworkId.substr(1),
 		complexObjs = [],
-		varIdentifier = frameworkAlias+'-var:',
-		noRenderElIdentifier = frameworkAlias+'-no-render:',
+		varIdentifier = frameworkId+'-var:',
+		noRenderElIdentifier = frameworkId+'-no-render:',
 		symbols = [
 			'component',
 			'repData',
@@ -23,10 +22,10 @@
 		}, {}),
 		routeTypes = ['seg', 'json'],
 		compPreRenderAttr = 'data-component-name',
-		compRenderedAttr = 'data-'+frameworkAlias+'-comp',
-		compRenderedInstanceAttr = 'data-'+frameworkAlias+'-instance',
-		repElAttr = 'data-'+frameworkAlias+'-rep-sel',
-		repSelAttr = 'data-'+frameworkAlias+'-rep-sel',
+		compRenderedAttr = 'data-'+frameworkId+'-comp',
+		compRenderedInstanceAttr = 'data-'+frameworkId+'-instance',
+		repElAttr = 'data-'+frameworkId+'-rep-sel',
+		repSelAttr = 'data-'+frameworkId+'-rep-sel',
 		regex = {
 			unquotedAttr: /<[a-z]+[^>]* ([a-z][a-z0-9\-_]*)=[^'"][^>]*>/i,
 			childComps: /<([A-Z][a-z\d\-]*)[^>]*>/g,
@@ -98,8 +97,8 @@
 		//validate routes
 		if (this.validateRoutes()) return this.error(this.validateRoutes());
 
-		//single components file rather than separate files? Parse and cache. Also handles special scenario of Aprikos playground, where components data
-		//is read from Aprikos.compsContentHook() func.
+		//single components file rather than separate files? Parse and cache. Also handles special scenario of Lucid playground, where components data
+		//is read from Lucid.compsContentHook() func.
 		const ready = new Promise(res => {
 			if (!this.compsFile && typeof window[classId].compsContentHook != 'function') return res();
 			if (!window[classId].compsContentHook) {
@@ -283,8 +282,8 @@
 
 		//...prep sheet
 		const sheet = document.createElement('style'),
-			compRef = '[data-'+frameworkAlias+'-comp="'+compName+'"]';
-		sheet.setAttribute('data-'+frameworkAlias+'-comp', compName);
+			compRef = '[data-'+frameworkId+'-comp="'+compName+'"]';
+		sheet.setAttribute('data-'+frameworkId+'-comp', compName);
 		document.head.appendChild(sheet);
 		sheet.innerHTML = css.trim();
 
@@ -1255,7 +1254,7 @@
 	function isComplex(item) { return ['object', 'function'].includes(typeof item); }
 
 	/* ---
-	| (UTIL) VAR FORMAT - format braces-based vars i.e. {{foo}} to comment-based vars e.g. <!--aprk-var:foo-->
+	| (UTIL) VAR FORMAT - format braces-based vars i.e. {{foo}} to comment-based vars e.g. <!--lucid-var:foo-->
 	--- */
 
 	function varsToCommentVars(str) {
