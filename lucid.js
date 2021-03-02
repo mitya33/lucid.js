@@ -16,6 +16,7 @@
 		symbols = [
 			'component',
 			'repData',
+			'fmCache'
 		].reduce((obj, val) => {
 			obj[val] = Symbol();
 			return obj;
@@ -31,7 +32,7 @@
 			unquotedAttr: /<[a-z]+[^>]* ([a-z][a-z0-9\-_]*)=[^'"][^>]*>/i,
 			childComps: /<([A-Z][a-z\d\-]*)[^>]*>/g,
 			repOrCondChildCompSel: /\b([A-Z][a-z\d\-]*)(?!=["\]])\b/g,
-			vars: /\{\{([^\}\|]+)(?:\|(\w+)\(\))?\}\}/g,
+			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
 			liveAttr: /^[\s\S]+\/@[\w\-]+$/,
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
@@ -800,10 +801,20 @@
 	proto.parseVars = function(str, pool, stage, comp, repIteration) {
 
 		let val;
-		return str.replace(regex.varsAsComments, (match, varName, filterMethod) => {
+		return str.replace(regex.varsAsComments, (match, varName, filterMethod, fmCache) => {
 			
 			//run through a filter method (of the app, or the component)?
 			let fmFunc = filterMethod && (comp.methods[filterMethod] || this.methods[filterMethod]);
+
+			//if filter method, fresh or from cache?
+			if (fmFunc && fmCache) fmFunc = (fmFunc => (val, comp) => {
+				fmFunc[symbols.fmCache] = fmFunc[symbols.fmCache] || new Map();
+				let cachedVal = fmFunc[symbols.fmCache].get(val);
+				if (cachedVal) return cachedVal;
+				let freshVal = fmFunc(val, comp);
+				fmFunc[symbols.fmCache].set(val, freshVal);
+				return freshVal;
+			})(fmFunc, comp);
 
 			//no data for swaps - retain placeholder
 			if (!pool) return match;
