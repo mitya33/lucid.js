@@ -30,7 +30,8 @@
 		repSelAttr = 'data-'+frameworkId+'-rep-sel',
 		regex = {
 			unquotedAttr: /<[a-z]+[^>]* ([a-z][a-z0-9\-_]*)=[^'"][^>]*>/i,
-			childComps: /<([A-Z][a-z\d\-]*)[^>]*>/g,
+			childCompName: /[A-Z][A-Za-z\d\-]*/,
+			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^>]*>/g,
 			repOrCondChildCompSel: /\b([A-Z][a-z\d\-]*)(?!=["\]])\b/g,
 			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
@@ -38,7 +39,8 @@
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
 			condOrRepSelNoReachIntoChildComp: /[A-Z][a-zA-Z\d-]* +[a-zA-Z]/,
 			pseudo: /::?[\w\-]+/,
-			routeDataVars: /^\$rd:/
+			routeDataVars: /^\$rd:/,
+			dynamicCompJsBody: /(^[^\{]+\{|\}$|^\([^\)]*\) *=> *)/g
 		};
 		regex.varsAsComments = new RegExp(regex.vars.source.replace('\\{\\{', '<!-- ?'+varIdentifier).replace('\\}\\}', ' ?-->').replace('^\\}', '^\\-'), 'g');
 
@@ -576,7 +578,6 @@
 			reRendered: isReRender !== undefined,
 			parent: parentCompObj,
 			app: this,
-			methods: {},
 			master: this.components[this.masterComponent][0]
 		};
 		for (let detail in about) Object.defineProperty(comp, detail, {value: about[detail]});
@@ -588,7 +589,7 @@
 		comp.activeState = !prevBuild ? 0 : prevBuild.activeState;
 		comp.activeIndexedState = !prevBuild ? 0 : prevBuild.activeIndexedState;
 
-		//some private, symbol-based stuff
+		//some private stuff
 		comp.repeaterOrigNodes = {};
 		comp.statesCache = prevBuild ? prevBuild.statesCache : [new Proxy(copyObj(comp.data), this.getProxyConfig(comp))];
 		comp.persistentStatesCache = prevBuild ? prevBuild.persistentStatesCache : {};
@@ -631,6 +632,25 @@
 			reprocessConds: sel => this.processConds(comp, 1, sel, 1),
 			reprocessAttrs: (sel, flushCache) => this.processAttrs(comp, sel),
 			reprocessOutput: sel => this.processOutput(comp, sel),
+
+			//...create dynamic child component - render it, unless it's subject to a conditional
+			createChildComponent: (name, css, html, js) => {
+				if (!regex.childCompName.test(name)) return this.error(name+' is not a valid child component name in call to createChildComponent() - must start with uppercase letter');
+				js = js && js.toString().replace(regex.dynamicCompJsBody, '');
+				this.compFilesCache[name.toLowerCase()] = (css ? '<style>'+css+'</style>' : '')+html+(js ? '<script>'+js+'</script>' : '');
+				return {
+					insert: (el, how = 'append') => {
+						if (!['append', 'prepend', 'after', 'before'].includes(how)) return this.error(how+' is not a valid insertion instruction in call to createChildComponent()');
+						let tmp = document.createElement(childCompTmpTagName(el.tagName)),
+							compName = name.toLowerCase();
+						tmp.setAttribute(compPreRenderAttr, compName);
+						el[how+(/ppend$/.test(how) ? 'Child' : '')](tmp);
+						!comp.conditionals || !comp.conditionals[name] ?
+							this.loadComponent(compName, compName, {}, undefined, comp) :
+							comp.rc(name);
+					}
+				}
+			},
 
 			//...message (another component)
 			message: (xpath, data) => this.compMessage(comp, xpath.toLowerCase(), data),
@@ -733,7 +753,7 @@
 
 		//add explicit closing tags to child components (most browsers support custom tags via the HTMLUnknownElement interface, but these must be explicitly closed
 		//also transfer component name to identifier attribute
-		html = html.replace(regex.childComps, (match, compName) => match
+		html = html.replace(regex.childCompTags, (match, compName) => match
 			.replace('<'+compName, '<'+compName+' '+compPreRenderAttr+'='+compName.toLowerCase())
 			.replace(/ *\/(?=>$)/, '')
 		+'</'+compName+'>');
@@ -803,17 +823,17 @@
 		let val;
 		return str.replace(regex.varsAsComments, (match, varName, filterMethod, fmCache) => {
 			
-			//run through a filter method (of the app, or the component)?
-			let fmFunc = filterMethod && (comp.methods[filterMethod] || this.methods[filterMethod]);
-
-			//if filter method, fresh or from cache?
-			if (fmFunc && fmCache) fmFunc = (fmFunc => (val, comp) => {
+			//run through a filter method (of the app, or the component)? If so, live or cached value?
+			let fmFunc = filterMethod && ((comp.methods || {})[filterMethod] || this.methods[filterMethod]);
+			fmFunc = !fmFunc ? null : (fmFunc => (val, comp) => {
+				if (!fmFunc) return null;
 				fmFunc[symbols.fmCache] = fmFunc[symbols.fmCache] || new Map();
-				let cachedVal = fmFunc[symbols.fmCache].get(val);
-				if (cachedVal) return cachedVal;
-				let freshVal = fmFunc(val, comp);
-				fmFunc[symbols.fmCache].set(val, freshVal);
-				return freshVal;
+				if (!fmCache || !fmFunc[symbols.fmCache].has(val)) {
+					let freshVal = fmFunc(val, comp);
+					fmFunc[symbols.fmCache].set(val, freshVal);
+					return freshVal;
+				}
+				return fmFunc[symbols.fmCache].get(val);
 			})(fmFunc, comp);
 
 			//no data for swaps - retain placeholder
