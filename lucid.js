@@ -29,9 +29,9 @@
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
 		repSelAttr = 'data-'+frameworkId+'-rep-sel',
 		regex = {
-			tag: /<([A-Za-z]\w+)[^>]*>[\s\S]+/,
+			parentTag: /<([A-Za-z]\w+)[^>]*>[\s\S]+/,
 			childCompName: /^[A-Z][A-Za-z\d\-]*$/,
-			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^>]*>/g,
+			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^<>]*?>/g,
 			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
 			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
@@ -170,7 +170,7 @@
 
 		return new Promise(async res => {
 
-			//await new Promise(res => setTimeout(res, 1000)); //<-- uncomment to check chronology
+			//await new Promise(res => setTimeout(res, 500)); //<-- uncomment to check chronology
 
 			//get component content, from file or cache - if construc.compsFile, must be declared in central components file
 			let fp = this.compsPath+'/'+name.toLowerCase()+'.html'+(!this.noCacheCompFiles ? '' : '?r='+Math.round(Math.random() * 10000));
@@ -755,13 +755,15 @@
 		html = html.replace(new RegExp('(\\s+[\\w-]+=)('+regex.vars.source+')(?=\\s+(\\/?>|[\\w-]+=))'), (match, $0, $1) => $0+'"'+$1+'"');
 
 		//swap child component templates for suitable, valid HTML elements based on parent tag
-		html = html.replace(new RegExp(regex.tag.source+regex.childCompTags.source), (match, parentTag, compName) => {
-			let replTag = childCompTmpTagName(parentTag);
+		html = html.replace(regex.childCompTags, (match, compName) => {
+			let parentTag = html.match(regex.parentTag.source+'<'+compName);
+			let replTag = childCompTmpTagName(parentTag[1]);
 			return match
 				.replace('<'+compName, '<'+replTag+' '+compPreRenderAttr+'='+compName.toLowerCase())
 				.replace(/ *\/(?=>$)/, '')
 				+'</'+replTag+'>';
 		});
+
 
 		//convert var placeholders to HTML comment form, so they don't render until (and unless) parsed
 		html = varsToCommentVars(html);
@@ -952,7 +954,11 @@
 	proto.renderChildComps = async function(comp) {
 
 		//iterate over child comp refs...
-		for (let node of [...comp.DOM.querySelectorAll('['+compPreRenderAttr+']')]) {
+		let nodes = comp.DOM.querySelectorAll('['+compPreRenderAttr+']');
+		for (let node of [...nodes]) {
+
+			//...due to asynchronicity we may already have processed this node
+			if (!node.parentNode) continue;
 
 			//...prep props
 			let compName = node.getAttribute(compPreRenderAttr),
