@@ -29,10 +29,9 @@
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
 		repSelAttr = 'data-'+frameworkId+'-rep-sel',
 		regex = {
-			unquotedAttr: /<[a-z]+[^>]* ([a-z][a-z0-9\-_]*)=[^'"][^>]*>/i,
-			childCompName: /[A-Z][A-Za-z\d\-]*/,
+			childCompName: /^[A-Z][A-Za-z\d\-]*$/,
 			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^>]*>/g,
-			repOrCondChildCompSel: /\b([A-Z][a-z\d\-]*)(?!=["\]])\b/g,
+			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
 			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
 			liveAttr: /^[\s\S]+\/@[\w\-]+$/,
@@ -436,6 +435,8 @@
 		//iterate over conditionals...
 		for (let selector in conditionals) {
 
+			if (!conditionals[selector]) continue;
+
 			if (!this.validateSel(selector, 'conds', comp.name)) continue;
 
 			//...ascertain selector - as with ::processReps()
@@ -530,7 +531,6 @@
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
 				acceptNode: node => node.closest('['+compRenderedAttr+']') === comp.DOM && !node.matches('['+compPreRenderAttr+']')
 			}),
-			nodes = [],
 			node,
 			els = [],
 			attrs = [];
@@ -645,9 +645,8 @@
 							compName = name.toLowerCase();
 						tmp.setAttribute(compPreRenderAttr, compName);
 						el[how+(/ppend$/.test(how) ? 'Child' : '')](tmp);
-						!comp.conditionals || !comp.conditionals[name] ?
-							this.loadComponent(compName, compName, props, undefined, comp) :
-							comp.rc(name);
+						this.loadComponent(compName, compName, props, undefined, comp);
+						comp.rc(name);
 					}
 				}
 			},
@@ -751,12 +750,18 @@
 			$1+' '+compRenderedAttr+'="'+compObj.name+'" '+compRenderedInstanceAttr+'="'+compObj.instance+'">'
 		);
 
-		//add explicit closing tags to child components (most browsers support custom tags via the HTMLUnknownElement interface, but these must be explicitly closed
-		//also transfer component name to identifier attribute
-		html = html.replace(regex.childCompTags, (match, compName) => match
-			.replace('<'+compName, '<'+compName+' '+compPreRenderAttr+'='+compName.toLowerCase())
-			.replace(/ *\/(?=>$)/, '')
-		+'</'+compName+'>');
+		//quote var-containing attributes - else the trailing '>' of the comment-based var pattern, if used in unquoted attrs, will be parsed as closing the element
+		html = html.replace(new RegExp('(\\s+[\\w-]+=)('+regex.vars.source+')(?=\\s+(\\/?>|[\\w-]+=))'), (match, $0, $1) => $0+'"'+$1+'"');
+
+		//swap child component templates for suitable, valid HTML elements. Also add explicit closing tags to child components (most browsers support custom
+		//tags via the HTMLUnknownElement interface, but these must be explicitly closed also transfer component name to identifier attribute
+		html = html.replace(regex.childCompTags, (match, compName) => {
+			let replTag = childCompTmpTagName('foo');
+			return match
+				.replace('<'+compName, '<'+replTag+' '+compPreRenderAttr+'='+compName.toLowerCase())
+				.replace(/ *\/(?=>$)/, '')
+				+'</'+replTag+'>';
+		});
 
 		//convert var placeholders to HTML comment form, so they don't render until (and unless) parsed
 		html = varsToCommentVars(html);
@@ -1245,8 +1250,6 @@
 	function checkCompContent(content, compName, fp) {
 		const errPart = ' in component "'+compName+'"';
 		if (!content.html) return 'Could not find component HTML'+errPart;
-		const unquotedAttr = content.html[0].match(regex.unquotedAttr);
-		if (unquotedAttr) return 'Attributes in component templates must be quoted - found unquoted attribute @'+unquotedAttr[1]+errPart;
 		if (content.html.includes('<'+compName)) return 'Recursion error - components cannot refer to themselves as child components'+errPart;
 	}
 
