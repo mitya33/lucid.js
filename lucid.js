@@ -29,6 +29,7 @@
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
 		repSelAttr = 'data-'+frameworkId+'-rep-sel',
 		regex = {
+			tag: /<([A-Za-z]\w+)[^>]*>[\s\S]+/,
 			childCompName: /^[A-Z][A-Za-z\d\-]*$/,
 			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^>]*>/g,
 			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
@@ -753,10 +754,9 @@
 		//quote var-containing attributes - else the trailing '>' of the comment-based var pattern, if used in unquoted attrs, will be parsed as closing the element
 		html = html.replace(new RegExp('(\\s+[\\w-]+=)('+regex.vars.source+')(?=\\s+(\\/?>|[\\w-]+=))'), (match, $0, $1) => $0+'"'+$1+'"');
 
-		//swap child component templates for suitable, valid HTML elements. Also add explicit closing tags to child components (most browsers support custom
-		//tags via the HTMLUnknownElement interface, but these must be explicitly closed also transfer component name to identifier attribute
-		html = html.replace(regex.childCompTags, (match, compName) => {
-			let replTag = childCompTmpTagName('foo');
+		//swap child component templates for suitable, valid HTML elements based on parent tag
+		html = html.replace(new RegExp(regex.tag.source+regex.childCompTags.source), (match, parentTag, compName) => {
+			let replTag = childCompTmpTagName(parentTag);
 			return match
 				.replace('<'+compName, '<'+replTag+' '+compPreRenderAttr+'='+compName.toLowerCase())
 				.replace(/ *\/(?=>$)/, '')
