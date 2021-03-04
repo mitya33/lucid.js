@@ -639,14 +639,14 @@
 				js = js && js.toString().replace(regex.dynamicCompJsBody, '');
 				this.compFilesCache[name.toLowerCase()] = (css ? '<style>'+css+'</style>' : '')+html+(js ? '<script>'+js+'</script>' : '');
 				return {
-					insert: (el, how = 'append') => {
+					insert: (el, props = {}, how = 'append') => {
 						if (!['append', 'prepend', 'after', 'before'].includes(how)) return this.error(how+' is not a valid insertion instruction in call to createChildComponent()');
 						let tmp = document.createElement(childCompTmpTagName(el.tagName)),
 							compName = name.toLowerCase();
 						tmp.setAttribute(compPreRenderAttr, compName);
 						el[how+(/ppend$/.test(how) ? 'Child' : '')](tmp);
 						!comp.conditionals || !comp.conditionals[name] ?
-							this.loadComponent(compName, compName, {}, undefined, comp) :
+							this.loadComponent(compName, compName, props, undefined, comp) :
 							comp.rc(name);
 					}
 				}
