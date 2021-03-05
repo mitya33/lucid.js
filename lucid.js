@@ -366,7 +366,7 @@
 			//...establish el (singular) targeted by selector
 			let tmpltEl;
 			if (!isReprocess) {
-				tmpltEl = comp.DOM.querySelectorAll(selector);
+				tmpltEl = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
 				if (tmpltEl.length > 1)
 					return this.error('Repeater selector "'+origSelector+'" targets more than 1 element in component "'+comp.name+'"');
 				if (!tmpltEl.length) return;
@@ -380,10 +380,12 @@
 			//if reprocess - delete any previous repeater els for this selector
 			if (isReprocess) {
 				let removeChildComps = [];
-				comp.DOM.querySelectorAll('['+repElAttr+'="'+encodeURIComponent(selector)+'"]').forEach(el => {
-					el[symbols.component] && removeChildComps.push(el[symbols.component]);
-					el.parentNode.removeChild(el);
-				});
+				[...comp.DOM.querySelectorAll('['+repElAttr+'="'+encodeURIComponent(selector)+'"]')]
+					.filter(el => this.checkParentage(el, comp.DOM))
+					.forEach(el => {
+						el[symbols.component] && removeChildComps.push(el[symbols.component]);
+						el.parentNode.removeChild(el);
+					});
 				removeChildComps.length && this.clearChildComps(comp, null, removeChildComps);
 			}
 
@@ -451,9 +453,9 @@
 			//it'll exist in DOM as a commented-out tag. Temporarily render it, so it can be found by selector
 			let temporarilyRendered = [];
 			if (isReprocess) {
-				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].reduce((acc, node) => {
-					return [...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))];
-				}, []);
+				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM)).reduce((acc, node) =>
+					[...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))]
+				, []);
 				comments.forEach(comment => {
 					const content = comment.nodeValue.replace(noRenderElIdentifier, ''),
 						frag = document.createElement(idealParentTag(content));
@@ -463,7 +465,7 @@
 					comment.replaceWith(frag.children[0]);
 				});
 			}
-			let els = comp.DOM.querySelectorAll(selector);
+			let els = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
 			temporarilyRendered.filter(el => ![...els].includes(el)).forEach(el => {
 				let com = document.createComment(noRenderElIdentifier+el._template);
 				el.replaceWith(com);
@@ -483,9 +485,10 @@
 					}
 					let com = document.createComment(noRenderElIdentifier+condEl._template);
 					condEl.replaceWith(com);
-					if (force) this.processConds(comp, isReprocess, sel);
 				}
 			});
+
+			if (force) this.processConds(comp, isReprocess, origSelector);
 
 		}
 
@@ -503,7 +506,7 @@
 	proto.processOutput = function(comp, sel) {
 		for (let which of ['comment', 'text']) {
 			let walker = document.createTreeWalker(!sel ? comp.DOM : comp.DOM.querySelector(sel), NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
-					!!(node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->'))
+					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM))
 				}),
 				nodes = [],
 				node;
@@ -530,7 +533,7 @@
 
 		//get attrs
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
-				acceptNode: node => node.closest('['+compRenderedAttr+']') === comp.DOM && !node.matches('['+compPreRenderAttr+']')
+				acceptNode: node => !node.matches('['+compPreRenderAttr+']') && this.checkParentage(node, comp.DOM)
 			}),
 			node,
 			els = [],
@@ -641,11 +644,12 @@
 				this.compFilesCache[name.toLowerCase()] = (css ? '<style>'+css+'</style>' : '')+html+(js ? '<script>'+js+'</script>' : '');
 				return {
 					insert: (el, props = {}, how = 'append') => {
+						let willBeChild = /ppend$/.test(how);
 						if (!['append', 'prepend', 'after', 'before'].includes(how)) return this.error(how+' is not a valid insertion instruction in call to createChildComponent()');
-						let tmp = document.createElement(childCompTmpTagName(el.tagName)),
+						let tmp = document.createElement(childCompTmpTagName((willBeChild ? el : el.parentNode).tagName)),
 							compName = name.toLowerCase();
 						tmp.setAttribute(compPreRenderAttr, compName);
-						el[how+(/ppend$/.test(how) ? 'Child' : '')](tmp);
+						el[how+(willBeChild ? 'Child' : '')](tmp);
 						this.loadComponent(compName, compName, props, undefined, comp);
 						comp.rc(name);
 					}
@@ -957,8 +961,8 @@
 		let nodes = comp.DOM.querySelectorAll('['+compPreRenderAttr+']');
 		for (let node of [...nodes]) {
 
-			//...due to asynchronicity we may already have processed this node
-			if (!node.parentNode) continue;
+			//...due to asynchronicity we may already have processed this node. Also skip if is not directly part of this component.
+			if (!node.parentNode || !this.checkParentage(node, comp.DOM)) continue;
 
 			//...prep props
 			let compName = node.getAttribute(compPreRenderAttr),
@@ -1244,6 +1248,17 @@
 				props[attr.name] = this.parseVars(attr.value, comp.data, 'init', comp);
 		});
 		return props;
+	}
+
+	/* ---
+	| (UTIL) - CHECK PARENTAGE - check an element is a direct element of a component (not of a deeper-level component). Args:
+	|	@el (obj)		- the element
+	|	@compEl (obj)	- the component DOM that @el should live under
+	--- */
+
+	proto.checkParentage = function(el, compEl) {
+		let newEl = el.matches('['+compRenderedAttr+']') && el.getAttribute(compRenderedAttr) != 'master' ? el.parentNode : el;
+		return newEl.closest('['+compRenderedAttr+']') === compEl;
 	}
 
 	/* ---
