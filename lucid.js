@@ -366,7 +366,7 @@
 			//...establish el (singular) targeted by selector
 			let tmpltEl;
 			if (!isReprocess) {
-				tmpltEl = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
+				tmpltEl = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM, 1));
 				if (tmpltEl.length > 1)
 					return this.error('Repeater selector "'+origSelector+'" targets more than 1 element in component "'+comp.name+'"');
 				if (!tmpltEl.length) return;
@@ -381,7 +381,7 @@
 			if (isReprocess) {
 				let removeChildComps = [];
 				[...comp.DOM.querySelectorAll('['+repElAttr+'="'+encodeURIComponent(selector)+'"]')]
-					.filter(el => this.checkParentage(el, comp.DOM))
+					.filter(el => this.checkParentage(el, comp.DOM, 2))
 					.forEach(el => {
 						el[symbols.component] && removeChildComps.push(el[symbols.component]);
 						el.parentNode.removeChild(el);
@@ -453,7 +453,7 @@
 			//it'll exist in DOM as a commented-out tag. Temporarily render it, so it can be found by selector
 			let temporarilyRendered = [];
 			if (isReprocess) {
-				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM)).reduce((acc, node) =>
+				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM, 3)).reduce((acc, node) =>
 					[...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))]
 				, []);
 				comments.forEach(comment => {
@@ -465,7 +465,7 @@
 					comment.replaceWith(frag.children[0]);
 				});
 			}
-			let els = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
+			let els = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM, 4));
 			temporarilyRendered.filter(el => ![...els].includes(el)).forEach(el => {
 				let com = document.createComment(noRenderElIdentifier+el._template);
 				el.replaceWith(com);
@@ -506,7 +506,7 @@
 	proto.processOutput = function(comp, sel) {
 		for (let which of ['comment', 'text']) {
 			let walker = document.createTreeWalker(!sel ? comp.DOM : comp.DOM.querySelector(sel), NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
-					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM))
+					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM, 5))
 				}),
 				nodes = [],
 				node;
@@ -533,7 +533,7 @@
 
 		//get attrs
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
-				acceptNode: node => !node.matches('['+compPreRenderAttr+']') && this.checkParentage(node, comp.DOM)
+				acceptNode: node => !node.matches('['+compPreRenderAttr+']') && this.checkParentage(node, comp.DOM, 6)
 			}),
 			node,
 			els = [],
@@ -962,7 +962,7 @@
 		for (let node of [...nodes]) {
 
 			//...due to asynchronicity we may already have processed this node. Also skip if is not directly part of this component.
-			if (!node.parentNode || !this.checkParentage(node, comp.DOM)) continue;
+			if (!node.parentNode || !this.checkParentage(node, comp.DOM, 7)) continue;
 
 			//...prep props
 			let compName = node.getAttribute(compPreRenderAttr),
@@ -1256,9 +1256,10 @@
 	|	@compEl (obj)	- the component DOM that @el should live under
 	--- */
 
-	proto.checkParentage = function(el, compEl) {
-		let newEl = el.matches('['+compRenderedAttr+']') && el.getAttribute(compRenderedAttr) != 'master' ? el.parentNode : el;
-		return newEl.closest('['+compRenderedAttr+']') === compEl;
+	proto.checkParentage = function(el, compEl, foo) {
+		el = [3, 8].includes(el.nodeType) || (el.matches('['+compRenderedAttr+']') && el.getAttribute(compRenderedAttr) != this.masterComponent) ? el.parentNode : el;
+		while (!el.matches('['+compRenderedAttr+']')) el = el.parentNode;
+		return el === compEl;
 	}
 
 	/* ---
