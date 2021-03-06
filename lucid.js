@@ -650,8 +650,9 @@
 							compName = name.toLowerCase();
 						tmp.setAttribute(compPreRenderAttr, compName);
 						el[how+(willBeChild ? 'Child' : '')](tmp);
-						this.loadComponent(compName, compName, props, undefined, comp);
-						comp.rc(name);
+						!comp.conditionals || !comp.conditionals[name] ?
+							this.loadComponent(compName, compName, props, undefined, comp) :
+							comp.rc(name);
 					}
 				}
 			},
