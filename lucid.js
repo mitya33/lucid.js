@@ -13,17 +13,14 @@
 		complexObjs = [],
 		varIdentifier = frameworkId+'-var:',
 		noRenderElIdentifier = frameworkId+'-no-render:',
-		symbols = [
-			'component',
-			'repData',
-			'fmCache'
-		].reduce((obj, val) => {
-			obj[val] = Symbol();
-			return obj;
-		}, {}),
+		symbols = {
+			component: Symbol(),
+			repData: Symbol(),
+			fmCache: Symbol()
+		},
 		routeTypes = ['seg', 'json'],
-		compPreRenderAttr = 'data-component-name',
 		startUri = location.pathname,
+		compPreRenderAttr = 'data-component-name',
 		compRenderedAttr = 'data-'+frameworkId+'-comp',
 		compRenderedInstanceAttr = 'data-'+frameworkId+'-instance',
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
@@ -35,7 +32,6 @@
 			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
 			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
-			liveAttr: /^[\s\S]+\/@[\w\-]+$/,
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
 			condOrRepSelNoReachIntoChildComp: /[A-Z][a-zA-Z\d-]* +[a-zA-Z]/,
 			pseudo: /::?[\w\-]+/,
