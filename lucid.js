@@ -5,7 +5,7 @@
 
 'use strict';
 
-(() => {
+const Lucid = window.Lucid || (() => {
 
 	//general framework prep
 	const frameworkId = 'lucid',
@@ -30,15 +30,15 @@
 			childCompName: /^[A-Z][A-Za-z\d\-]*$/,
 			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^<>]*?>/g,
 			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
-			vars: /\{\{([^\}\|]+)(?:\|(\w+)\((1|true)?\))?\}\}/g,
+			vars: /{{([^}\|]+)(?:\|(\w+)\((1|true)?\))?}}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
-			condOrRepSelNoReachIntoChildComp: /[A-Z][a-zA-Z\d-]* +[a-zA-Z]/,
+			condOrRepSelNoReachIntoChildComp: /[A-Z][A-Za-z\d\-]* +[a-zA-Z]/,
 			pseudo: /::?[\w\-]+/,
 			routeDataVars: /^\$rd:/,
-			dynamicCompJsBody: /(^[^\{]+\{|\}$|^\([^\)]*\) *=> *)/g
+			dynamicCompJsBody: /(^[^{]+{|}$|^\([^\)]*\) *=> *)/g
 		};
-		regex.varsAsComments = new RegExp(regex.vars.source.replace('\\{\\{', '<!-- ?'+varIdentifier).replace('\\}\\}', ' ?-->').replace('^\\}', '^\\-'), 'g');
+		regex.varsAsComments = new RegExp(regex.vars.source.replace('{{', '<!-- ?'+varIdentifier).replace('}}', ' ?-->').replace('^}', '^-'), 'g');
 
 	/* ---
 	| CONSTRUCTOR - args:
@@ -58,12 +58,12 @@
 	|		@data (obj)					- an object of starting data, i.e. props for the master component
 	--- */
 
-	window[classId] = window[classId] || function(params) {
+	function engine(params) {
 
 		//prep & containers
-		window[classId].apps = window[classId].apps || [];
-		window[classId].apps.push(this);
-		this.appId = window[classId].apps.length - 1;
+		engine.apps = engine.apps || [];
+		engine.apps.push(this);
+		this.appId = engine.apps.length - 1;
 		this.compFilesCache = {};
 		this.compDOMsCache = {};
 		this.compJsFuncs = {};
@@ -109,13 +109,13 @@
 		//is read from Lucid.compsContentHook() func.
 		const ready = new Promise(res => {
 			if (!this.compsFile && typeof window[classId].compsContentHook != 'function') return res();
-			if (!window[classId].compsContentHook) {
+			if (!engine.compsContentHook) {
 				const fp = this.compsPath+'/'+this.compsFile.replace(/\.html$/, '')+'.html';
 				fetch(fp)
-					.then(r => { if (r.ok) return r.text(); else throw 'could not load components from '+fp+' - check path'; })
+					.then(r => { if (r.ok) return r.text(); else throw new Error('could not load components from '+fp+' - check path'); })
 					.then(content => {
 						if (!regex.compsFileCompMarker.test(content))
-							throw 'components file '+fp+' is not properly formatted - components must be preceded by comment in format <!-- COMPONENT MYCOMPONENTNAME -->';
+							throw new Error('components file '+fp+' is not properly formatted - components must be preceded by comment in format <!-- COMPONENT MYCOMPONENTNAME -->');
 						content.replace(regex.compsFileCompMarker, ($0, compName) => {
 							const compContent = content.substr(content.indexOf($0)+$0.length).split(regex.compsFileCompMarker)[0];
 							this.compFilesCache[compName.toLowerCase()] = compContent;
@@ -141,7 +141,7 @@
 		ready.then(() => this.loadComponent(this.masterComponent, this.container, this.data+'' == '[object Object]' ? this.data : {}));
 
 	}
-	let proto = window[classId].prototype;
+	let proto = engine.prototype;
 
 	/* ---
 	| LOAD COMPONENT - load a component. Returns a promise, resolved when the component has fully rendered (including descendant components). 
@@ -229,7 +229,7 @@
 			fromRepSel && comp.DOM.setAttribute(repElAttr, fromRepSel);
 
 			//make DOM elements identifiable as components via symbol
-			comp.DOM[window[classId].component = symbols.component] = comp;
+			comp.DOM[engine.component = symbols.component] = comp;
 
 			//now render into DOM...
 
@@ -1340,6 +1340,6 @@
 		return target;
 	}
 
-	return window[classId];
+	return engine;
 
 })();
