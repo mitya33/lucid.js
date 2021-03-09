@@ -5,7 +5,7 @@
 
 'use strict';
 
-const Lucid = window.Lucid || (() => {
+window.Lucid = window.Lucid || (() => {
 
 	//general framework prep
 	const frameworkId = 'lucid',
