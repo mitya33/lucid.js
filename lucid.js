@@ -22,6 +22,7 @@ window.Lucid = window.Lucid || (() => {
 		startUri = location.pathname,
 		compPreRenderAttr = 'data-component-name',
 		compRenderedAttr = 'data-'+frameworkId+'-comp',
+		compModelAttr = 'data-'+frameworkId[0]+'model',
 		compRenderedInstanceAttr = 'data-'+frameworkId+'-instance',
 		repElAttr = 'data-'+frameworkId+'-rep-sel',
 		repSelAttr = 'data-'+frameworkId+'-rep-sel',
@@ -103,6 +104,15 @@ window.Lucid = window.Lucid || (() => {
 			if (!evt.target.matches('a[href^="route:"]')) return;
 			evt.preventDefault();
 			this.components[this.masterComponent][0].go(evt.target.getAttribute('href').replace(/^route:/, ''));
+		});
+
+		//handle models (binding with form inputs)
+		this.container.addEventListener('input', evt => {
+			if (!evt.target.matches('['+compModelAttr+']')) return;
+			let bindToDataProp = evt.target.getAttribute(compModelAttr),
+				comp = evt.target.closest('['+compRenderedAttr+']');
+			if (!comp || !bindToDataProp) return;
+			comp[symbols.component].data[bindToDataProp] = !evt.target.matches('[type=checkbox], [type=radio]') ? evt.target.value : evt.target.checked;
 		});
 
 		//single components file rather than separate files? Parse and cache. Also handles special scenario of Lucid playground, where components data
@@ -337,9 +347,10 @@ window.Lucid = window.Lucid || (() => {
 	|	@comp (obj)			- the component object
 	|	@isProcess (bool)	- if is later reprocess
 	|	@sel (str)			- reprocessing only - an optional selector to reprocess or, if omitted, all repeaters are reprocessed
+	|	@dataProp (?)		- if came from @comp's proxy setter, the property within @comp's @data object that was changed
 	--- */
 
-	proto.processReps = function(comp, isReprocess, sel) {
+	proto.processReps = function(comp, isReprocess, sel, dataProp) {
 
 		if (!comp.repeaters) return;
 
@@ -397,7 +408,7 @@ window.Lucid = window.Lucid || (() => {
 			//...process
 			repData.forEach((obj, i) => {
 				const tmplt = comp.repeaterOrigNodes[origSelector].nodeValue,
-					newHtml = this.parseVars(tmplt, obj, 'reps', comp, i),
+					newHtml = this.parseVars(tmplt, obj, 'reps', comp, i, dataProp),
 					frag = document.createElement(idealParentTag(newHtml));
 				frag.innerHTML = newHtml;
 				frag.children[0].setAttribute(repSelAttr, encodeURIComponent(selector));
@@ -422,9 +433,10 @@ window.Lucid = window.Lucid || (() => {
 	|	@sel (str)			- " " "
 	|	@force (bool)		- if element already showing, and reprocess decides it should still show, it's rerendered (normally left unchanged)
 	|						  This means its JS can run again and be fed fresh props.
+	|	@dataProp (?)		- if came from @comp's proxy setter, the property within @comp's @data object that was changed
 	--- */
 
-	proto.processConds = function(comp, isReprocess, sel, force) {
+	proto.processConds = function(comp, isReprocess, sel, force, dataProp) {
 
 		if (!comp.conditionals) return;
 
@@ -455,7 +467,7 @@ window.Lucid = window.Lucid || (() => {
 				comments.forEach(comment => {
 					const content = comment.nodeValue.replace(noRenderElIdentifier, ''),
 						frag = document.createElement(idealParentTag(content));
-					frag.innerHTML = this.parseVars(content, comp.data, 'reps', comp);
+					frag.innerHTML = this.parseVars(content, comp.data, 'reps', comp, null, dataProp);
 					temporarilyRendered.push(frag.children[0]);
 					frag.children[0]._template = content;
 					comment.replaceWith(frag.children[0]);
@@ -495,13 +507,17 @@ window.Lucid = window.Lucid || (() => {
 
 	/* ---
 	| OUTPUT VARS - as with ::processConds(), but for output, i.e. variables in free-flowing output. Args:
-	|	@comp (obj)	- the component object.
-	|	@sel (str)	- an optional selector targeting an element within which to process vars (else whole component DOM)
+	|	@comp (obj)		- the component object.
+	|	@sel (str)		- an optional selector targeting an element within which to process vars (else whole component DOM)
+	|	@dataProp (str)	- the name of the property within @comp's @data object that was changed, unless we're re/processing all output
 	--- */
 
-	proto.processOutput = function(comp, sel) {
+	proto.processOutput = function(comp, sel, dataProp) {
+
+		//textnodes/comments bindings
+		let context = !sel ? comp.DOM : comp.DOM.querySelector(sel);
 		for (let which of ['comment', 'text']) {
-			let walker = document.createTreeWalker(!sel ? comp.DOM : comp.DOM.querySelector(sel), NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
+			let walker = document.createTreeWalker(context, NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
 					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM, 5))
 				}),
 				nodes = [],
@@ -509,23 +525,30 @@ window.Lucid = window.Lucid || (() => {
 			while (node = walker.nextNode()) nodes.push(node);
 			nodes.forEach(node => {
 				let prop = which == 'comment' ? 'nodeValue' : 'varTmplt',
-					repl = this.parseVars('<!--'+(node[prop])+'-->', comp.data, 'init', comp);
-				if (repl && repl.indexOf('<!--') != 0) {
+					repl = this.parseVars('<!--'+(node[prop])+'-->', comp.data, 'init', comp, null, dataProp);
+				if ((repl || repl === '') && repl.indexOf('<!--') != 0) {
 					let tn = document.createTextNode(repl);
 					tn.varTmplt = node[prop];
 					node.replaceWith(tn);
 				}
 			});
 		}
+
+		//models bindings
+		[...context.querySelectorAll('['+compModelAttr+'="'+dataProp+'"]')].filter(el => ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(el.tagName)).forEach(el =>
+			!el.matches('[type=checkbox], [type=radio]') ? el.value = comp.data[dataProp] : el.checked = !!comp.data[dataProp]
+		);
+
 	}
 
 	/* ---
 	| ATTRIBUTE VARS - as with ::processConds(), but for attributes. Args:
 	|	@comp (obj)		- the component object
 	|	@attrType (str)	- for when reprocessing attrs manually; an attr name to target, otherwise all
+	|	@dataProp (?)	- if came from @comp's proxy setter, the property within @comp's @data object that was changed
 	--- */
 
-	proto.processAttrs = function(comp, attrType) {
+	proto.processAttrs = function(comp, attrType, dataProp) {
 
 		//get attrs
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
@@ -549,7 +572,7 @@ window.Lucid = window.Lucid || (() => {
 				tmplt = attr.varTmplt = attr.value;
 			if (!tmplt) continue;
 
-			attr.value = this.parseVars(tmplt, comp.data, 'init', comp);
+			attr.value = this.parseVars(tmplt, comp.data, 'init', comp, null, dataProp);
 
 		}
 	}
@@ -628,10 +651,10 @@ window.Lucid = window.Lucid || (() => {
 			on: on.bind(comp),
 
 			//...reprocess repeaters/conditionals/live attrs
-			reprocessReps: sel => this.processReps(comp, 1, sel),
-			reprocessConds: sel => this.processConds(comp, 1, sel, 1),
-			reprocessAttrs: (sel, flushCache) => this.processAttrs(comp, sel),
-			reprocessOutput: sel => this.processOutput(comp, sel),
+			reprocessReps: (sel, prop) => this.processReps(comp, 1, sel, prop),
+			reprocessConds: (sel, prop) => this.processConds(comp, 1, sel, 1, prop),
+			reprocessAttrs: (sel, flushCache, prop) => this.processAttrs(comp, sel, prop),
+			reprocessOutput: (sel, prop) => this.processOutput(comp, sel, prop),
 
 			//...create dynamic child component - render it, unless it's subject to a conditional
 			createChildComponent: (name, css, html, js) => {
@@ -824,12 +847,16 @@ window.Lucid = window.Lucid || (() => {
 	|									  values not objects)
 	|	@stage (str)					- the parsing stage - either initial ('init') or, later, when parsing repeaters ('reps')
 	|	@comp (obj)						- the component object we're parsing for
+	|	@repIteration (?)				- ?
+	|	@prop (?)						- a specific property of @comp's @data object that we're parsing, rather than all
 	--- */
 
-	proto.parseVars = function(str, pool, stage, comp, repIteration) {
+	proto.parseVars = function(str, pool, stage, comp, repIteration, prop) {
 
 		let val;
 		return str.replace(regex.varsAsComments, (match, varName, filterMethod, fmCache) => {
+
+			if (prop && !new RegExp(':'+prop+'($|\|)').test(match)) return pool[varName] || match;
 			
 			//run through a filter method (of the app, or the component)? If so, live or cached value?
 			let fmFunc = filterMethod && ((comp.methods || {})[filterMethod] || this.methods[filterMethod]);
@@ -1178,13 +1205,14 @@ window.Lucid = window.Lucid || (() => {
 	/* ---
 	| AUTO-REPROCESS - auto-reprocess any construct types allowed by the @autoReprocess instantiation param array - output (template vars), attrs, conds and reps. Args:
 	|	@comp (obj)	- the component object.
+	|	@prop (?)	- if this came from the proxy setter, the property within the component's object that was changed
 	--- */
 
-	proto.doAutoReprocess = function(comp) {
-		this.autoReprocess.includes('conds') && comp.rc(null, 1);
-		this.autoReprocess.includes('attrs') && comp.ra();
-		this.autoReprocess.includes('reps') && comp.rr();
-		this.autoReprocess.includes('output') && comp.ro();
+	proto.doAutoReprocess = function(comp, prop) {
+		this.autoReprocess.includes('conds') && comp.rc(null, prop);
+		this.autoReprocess.includes('attrs') && comp.ra(null, null, prop);
+		this.autoReprocess.includes('reps') && comp.rr(null, prop);
+		this.autoReprocess.includes('output') && comp.ro(null, prop);
 	}
 
 	/* ---
@@ -1198,7 +1226,7 @@ window.Lucid = window.Lucid || (() => {
 			get(obj, prop) { return typeof obj[prop] == 'object' && obj[prop] !== null ? new Proxy(obj[prop], outerThis.getProxyConfig(comp)) : obj[prop]; },
 			set(obj, prop, val) {
 				obj[prop] = val;
-				outerThis.doAutoReprocess(comp);
+				outerThis.doAutoReprocess(comp, prop);
 				return true;
 			}
 		};
