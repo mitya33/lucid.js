@@ -241,6 +241,9 @@ window.Lucid = window.Lucid || (() => {
 			//make DOM elements identifiable as components via symbol
 			comp.DOM[engine.component = symbols.component] = comp;
 
+			//repoint inline events to target component methods
+			repointInlineEvents(comp.DOM, comp);
+
 			//now render into DOM...
 
 			//...re-render of child component
@@ -411,6 +414,7 @@ window.Lucid = window.Lucid || (() => {
 					newHtml = this.parseVars(tmplt, obj, 'reps', comp, i, dataProp),
 					frag = document.createElement(idealParentTag(newHtml));
 				frag.innerHTML = newHtml;
+				repointInlineEvents(frag.children[0], comp);
 				frag.children[0].setAttribute(repSelAttr, encodeURIComponent(selector));
 				frag.children[0][window[classId].repData = symbols.repData] = obj;
 				tmpltEl.before(frag.children[0]);
@@ -461,13 +465,14 @@ window.Lucid = window.Lucid || (() => {
 			//it'll exist in DOM as a commented-out tag. Temporarily render it, so it can be found by selector
 			let temporarilyRendered = [];
 			if (isReprocess) {
-				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM, 3)).reduce((acc, node) =>
+				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')]/*.filter(el => this.checkParentage(el, comp.DOM, 3))*/.reduce((acc, node) =>
 					[...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))]
 				, []);
 				comments.forEach(comment => {
 					const content = comment.nodeValue.replace(noRenderElIdentifier, ''),
 						frag = document.createElement(idealParentTag(content));
 					frag.innerHTML = this.parseVars(content, comp.data, 'reps', comp, null, dataProp);
+					repointInlineEvents(frag.children[0], comp);
 					temporarilyRendered.push(frag.children[0]);
 					frag.children[0]._template = content;
 					comment.replaceWith(frag.children[0]);
@@ -611,6 +616,10 @@ window.Lucid = window.Lucid || (() => {
 		//states can (e.g. if you go to state 1, then go back to 0, then make a new state - a new state 1 is created, and the old is lost)
 		comp.activeState = !prevBuild ? 0 : prevBuild.activeState;
 		comp.activeIndexedState = !prevBuild ? 0 : prevBuild.activeIndexedState;
+
+		//container for methods and DOM events
+		comp.methods = {};
+		comp.events = {};
 
 		//some private stuff
 		comp.repeaterOrigNodes = {};
@@ -794,11 +803,6 @@ window.Lucid = window.Lucid || (() => {
 
 		//do initial parsing of vars (we'll do another sweep later, for repeaters)
 		html = this.parseVars(html, props, 'init', compObj);
-
-		//repoint inline event handlers to run in context of component (trigger element is passed in as $element)
-		html = html.replace(/( on[^=]+=(['"]))([\s\S]+?)\2/g, ($0, $1, $2, code) => {
-			return $1+'(function($element) { '+code+' }).call('+classId+'.apps['+this.appId+'].components.'+compObj.name+'['+compObj.instance+'], this)'+$2;
-		});
 
 		return html;
 
@@ -1366,6 +1370,28 @@ window.Lucid = window.Lucid || (() => {
 		for (let prop in src)
 			target[prop] = src[prop] && typeof src[prop] === 'object' ? copyObj(src[prop]) : src[prop];
 		return target;
+	}
+
+	/* ---
+	| (UTIL) - REPOINT INLINE EVENTS - repoint inline event handlers to run in context of component
+	|	@el (obj)	- the element to act on and within
+	|	@comp (obj)	- the associated component
+	--- */
+
+	function repointInlineEvents(el, comp) {
+		[el, ...el.querySelectorAll('*')].filter(el => / _?on[a-z]+=/.test(el.outerHTML)).forEach(el =>
+			[...el.attributes].filter(attr => /^_?on/.test(attr.name)).forEach(attr => {
+				el.setAttribute(('_'+attr.name).replace(/^_{2,}/, ''), attr.value);
+				el.removeAttribute(attr.name);
+				el[attr.name.replace(/^_/, '')] = function(evt) {
+					let compMethod = attr.value.match(/^([_a-z]+)(\([^\)]*\))?$/);
+					if (compMethod && this.events[compMethod[1]])
+						comp.events[attr.value](evt);
+					else
+						eval(attr.value);
+				}.bind(comp);
+			})
+		);
 	}
 
 	return engine;
