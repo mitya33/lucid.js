@@ -208,8 +208,10 @@ window.Lucid = window.Lucid || (() => {
 			//re-render? Clear descendant components ahead of them being remade, and clear previously-bound events bindings so not duplicated
 			if (isReRender !== undefined) {
 				this.clearChildComps(comp);
-				for (let evt in this.events)
+				for (let evt in this.events) {
+					alert('clear');
 					this.events[evt][name+'/'+compInstanceId] && delete this.events[evt][name+'/'+compInstanceId];
+				}
 			}
 			
 			//extract parts and derive an object with @js, @css and @html parts - only @html is mandatory
@@ -966,7 +968,7 @@ window.Lucid = window.Lucid || (() => {
 					//...and any event refs to it
 					for (let evt in this.events)
 						for (let compId in this.events[evt])
-							delete this.events[evt][compId];
+							new RegExp('^'+compName+'/').test(compId) && delete this.events[evt][compId];
 
 				}
 
@@ -1003,7 +1005,7 @@ window.Lucid = window.Lucid || (() => {
 	}
 
 	/* ---
-	| ATTACH EVENT - listen for a given (predefined, not DOM) event relating to a component. Proxied to comp.on() (and so called in the context
+	| ATTACH EVENT - listen for a given lifecycle (not DOM) event relating to a component. Proxied to comp.on() (and so called in the context
 	| of the component object). Args:
 	|	@event (str)		- the event to listen on - one of those declared in ::events
 	|	@cb (func)			- the callback
@@ -1384,9 +1386,9 @@ window.Lucid = window.Lucid || (() => {
 				el.setAttribute(('_'+attr.name).replace(/^_{2,}/, ''), attr.value);
 				el.removeAttribute(attr.name);
 				el[attr.name.replace(/^_/, '')] = function(evt) {
-					let compMethod = attr.value.match(/^([_a-z]+)(\([^\)]*\))?$/);
-					if (compMethod && this.events[compMethod[1]])
-						comp.events[attr.value](evt);
+					let evtStr = attr.value.match(/^([_a-z]+)(?:\(([^\)]*)\))?$/i);
+					if (evtStr && this.events[evtStr[1]])
+						eval('('+comp.events[evtStr[1]]+')('+evtStr[2]+')');
 					else
 						eval(attr.value);
 				}.bind(comp);
