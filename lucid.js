@@ -376,7 +376,7 @@ window.Lucid = window.Lucid || (() => {
 			//...establish el (singular) targeted by selector
 			let tmpltEl;
 			if (!isReprocess) {
-				tmpltEl = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM, 1));
+				tmpltEl = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
 				if (tmpltEl.length > 1)
 					return this.error('Repeater selector "'+origSelector+'" targets more than 1 element in component "'+comp.name+'"');
 				if (!tmpltEl.length) return;
@@ -391,7 +391,7 @@ window.Lucid = window.Lucid || (() => {
 			if (isReprocess) {
 				let removeChildComps = [];
 				[...comp.DOM.querySelectorAll('['+repElAttr+'="'+encodeURIComponent(selector)+'"]')]
-					.filter(el => this.checkParentage(el, comp.DOM, 2))
+					.filter(el => this.checkParentage(el, comp.DOM, 1) || 1) //<!-- #### TO DO - checkParentage() here can result in too many repeater items; `|| 1` is temp fix to allow all ####
 					.forEach(el => {
 						el[symbols.component] && removeChildComps.push(el[symbols.component]);
 						el.parentNode.removeChild(el);
@@ -1283,13 +1283,17 @@ window.Lucid = window.Lucid || (() => {
 	| (UTIL) - CHECK PARENTAGE - check an element is a direct child of a parent component, not a deeper component. Args:
 	|	@el (obj)		- the element
 	|	@compEl (obj)	- the DOM of the parent component that @el should live under
-	| #### TO DO - killed for now (returns true) as results in duplicate repeater items in to-app app ####
 	--- */
 
-	proto.checkParentage = function(el, compEl) {
-		return 1;
-		el = [3, 8].includes(el.nodeType) ? el.parentNode : el;
-		return el.closest('['+compRenderedAttr+']') === compEl;
+	proto.checkParentage = function(el, compEl, debug) {
+		let newEl = [3, 8].includes(el.nodeType) ? el.parentNode : el;
+		/*if (d) {
+			console.log('ORIG EL', el);
+			console.log('PARENT', compEl);
+			console.log('NEW EL', newEl);
+			console.log('RESULT', !!(newEl.closest('['+compRenderedAttr+']') === compEl));
+		}*/
+		return newEl.closest('['+compRenderedAttr+']') === compEl;
 	}
 
 	/* ---
