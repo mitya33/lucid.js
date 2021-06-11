@@ -208,10 +208,8 @@ window.Lucid = window.Lucid || (() => {
 			//re-render? Clear descendant components ahead of them being remade, and clear previously-bound events bindings so not duplicated
 			if (isReRender !== undefined) {
 				this.clearChildComps(comp);
-				for (let evt in this.events) {
-					alert('clear');
+				for (let evt in this.events)
 					this.events[evt][name+'/'+compInstanceId] && delete this.events[evt][name+'/'+compInstanceId];
-				}
 			}
 			
 			//extract parts and derive an object with @js, @css and @html parts - only @html is mandatory
