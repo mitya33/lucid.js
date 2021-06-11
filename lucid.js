@@ -450,6 +450,8 @@ window.Lucid = window.Lucid || (() => {
 		//iterate over conditionals...
 		for (let selector in conditionals) {
 
+			//console.log(selector);
+
 			if (!conditionals[selector]) continue;
 
 			if (!this.validateSel(selector, 'conds', comp.name)) continue;
@@ -465,7 +467,8 @@ window.Lucid = window.Lucid || (() => {
 			//it'll exist in DOM as a commented-out tag. Temporarily render it, so it can be found by selector
 			let temporarilyRendered = [];
 			if (isReprocess) {
-				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')]/*.filter(el => this.checkParentage(el, comp.DOM, 3))*/.reduce((acc, node) =>
+				//console.log('------------- CP in -----------', comp.name+'/'+comp.instance+' ('+comp.DOM.querySelectorAll('*').length+')');
+				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM, 3)).reduce((acc, node) =>
 					[...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))]
 				, []);
 				comments.forEach(comment => {
@@ -1280,15 +1283,14 @@ window.Lucid = window.Lucid || (() => {
 	}
 
 	/* ---
-	| (UTIL) - CHECK PARENTAGE - check an element is a direct element of a component (not of a deeper-level component). Args:
+	| (UTIL) - CHECK PARENTAGE - check an element is a direct child of a parent component, not a deeper component. Args:
 	|	@el (obj)		- the element
-	|	@compEl (obj)	- the component DOM that @el should live under
+	|	@compEl (obj)	- the DOM of the parent component that @el should live under
 	--- */
 
-	proto.checkParentage = function(el, compEl, foo) {
-		el = [3, 8].includes(el.nodeType) || (el.matches('['+compRenderedAttr+']') && el.getAttribute(compRenderedAttr) != this.masterComponent) ? el.parentNode : el;
-		while (!el.matches('['+compRenderedAttr+']')) el = el.parentNode;
-		return el === compEl;
+	proto.checkParentage = function(el, compEl, debug) {
+		el = [3, 8].includes(el.nodeType) && el != compEl.master ? el.parentNode : el;
+		return el.closest('['+compRenderedAttr+']') === compEl;
 	}
 
 	/* ---
