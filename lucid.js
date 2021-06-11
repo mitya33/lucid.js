@@ -450,8 +450,6 @@ window.Lucid = window.Lucid || (() => {
 		//iterate over conditionals...
 		for (let selector in conditionals) {
 
-			//console.log(selector);
-
 			if (!conditionals[selector]) continue;
 
 			if (!this.validateSel(selector, 'conds', comp.name)) continue;
@@ -467,8 +465,7 @@ window.Lucid = window.Lucid || (() => {
 			//it'll exist in DOM as a commented-out tag. Temporarily render it, so it can be found by selector
 			let temporarilyRendered = [];
 			if (isReprocess) {
-				//console.log('------------- CP in -----------', comp.name+'/'+comp.instance+' ('+comp.DOM.querySelectorAll('*').length+')');
-				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM, 3)).reduce((acc, node) =>
+				let comments = [comp.DOM, ...comp.DOM.querySelectorAll('*')].filter(el => this.checkParentage(el, comp.DOM)).reduce((acc, node) =>
 					[...acc, ...[...node.childNodes].filter(node => node.nodeType === 8 && new RegExp('^'+noRenderElIdentifier).test(node.nodeValue))]
 				, []);
 				comments.forEach(comment => {
@@ -481,7 +478,7 @@ window.Lucid = window.Lucid || (() => {
 					comment.replaceWith(frag.children[0]);
 				});
 			}
-			let els = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM, 4));
+			let els = [...comp.DOM.querySelectorAll(selector)].filter(el => this.checkParentage(el, comp.DOM));
 			temporarilyRendered.filter(el => ![...els].includes(el)).forEach(el => {
 				let com = document.createComment(noRenderElIdentifier+el._template);
 				el.replaceWith(com);
@@ -526,7 +523,7 @@ window.Lucid = window.Lucid || (() => {
 		let context = !sel ? comp.DOM : comp.DOM.querySelector(sel);
 		for (let which of ['comment', 'text']) {
 			let walker = document.createTreeWalker(context, NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
-					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM, 5))
+					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM))
 				}),
 				nodes = [],
 				node;
@@ -560,7 +557,7 @@ window.Lucid = window.Lucid || (() => {
 
 		//get attrs
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
-				acceptNode: node => !node.matches('['+compPreRenderAttr+']') && this.checkParentage(node, comp.DOM, 6)
+				acceptNode: node => !node.matches('['+compPreRenderAttr+']') && this.checkParentage(node, comp.DOM)
 			}),
 			node,
 			els = [],
@@ -993,7 +990,7 @@ window.Lucid = window.Lucid || (() => {
 		for (let node of [...nodes]) {
 
 			//...due to asynchronicity we may already have processed this node. Also skip if is not directly part of this component.
-			if (!node.parentNode || !this.checkParentage(node, comp.DOM, 7)) continue;
+			if (!node.parentNode || !this.checkParentage(node, comp.DOM)) continue;
 
 			//...prep props
 			let compName = node.getAttribute(compPreRenderAttr),
@@ -1286,9 +1283,11 @@ window.Lucid = window.Lucid || (() => {
 	| (UTIL) - CHECK PARENTAGE - check an element is a direct child of a parent component, not a deeper component. Args:
 	|	@el (obj)		- the element
 	|	@compEl (obj)	- the DOM of the parent component that @el should live under
+	| #### TO DO - killed for now (returns true) as results in duplicate repeater items in to-app app ####
 	--- */
 
-	proto.checkParentage = function(el, compEl, debug) {
+	proto.checkParentage = function(el, compEl) {
+		return 1;
 		el = [3, 8].includes(el.nodeType) ? el.parentNode : el;
 		return el.closest('['+compRenderedAttr+']') === compEl;
 	}
