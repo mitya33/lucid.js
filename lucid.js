@@ -391,7 +391,7 @@ window.Lucid = window.Lucid || (() => {
 			if (isReprocess) {
 				let removeChildComps = [];
 				[...comp.DOM.querySelectorAll('['+repElAttr+'="'+encodeURIComponent(selector)+'"]')]
-					.filter(el => this.checkParentage(el, comp.DOM, 1) || 1) //<!-- #### TO DO - checkParentage() here can result in too many repeater items; `|| 1` is temp fix to allow all ####
+					.filter(el => this.checkParentage(el, comp.DOM, 1))
 					.forEach(el => {
 						el[symbols.component] && removeChildComps.push(el[symbols.component]);
 						el.parentNode.removeChild(el);
@@ -1283,9 +1283,10 @@ window.Lucid = window.Lucid || (() => {
 	| (UTIL) - CHECK PARENTAGE - check an element is a direct child of a parent component, not a deeper component. Args:
 	|	@el (obj)		- the element
 	|	@compEl (obj)	- the DOM of the parent component that @el should live under
+	| TO DO: killed for now as was causing issues with repeaters - either duplicate items (to-do app) or not showing at all (routes2 session)
 	--- */
 
-	proto.checkParentage = function(el, compEl, debug) {
+	proto.checkParentage = function(el, compEl, debug) {return 1;
 		let newEl = [3, 8].includes(el.nodeType) ? el.parentNode : el;
 		/*if (d) {
 			console.log('ORIG EL', el);
