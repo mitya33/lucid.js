@@ -1289,7 +1289,7 @@ window.Lucid = window.Lucid || (() => {
 	--- */
 
 	proto.checkParentage = function(el, compEl, debug) {
-		el = [3, 8].includes(el.nodeType) && el != compEl.master ? el.parentNode : el;
+		el = [3, 8].includes(el.nodeType) ? el.parentNode : el;
 		return el.closest('['+compRenderedAttr+']') === compEl;
 	}
 
