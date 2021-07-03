@@ -50,7 +50,8 @@ window.Lucid = window.Lucid || (() => {
 	|		@compsFile (str)			- path to a .html file containing config for all components, rather than each having its own file
 	|		@methods (obj)				- object of app-level filter methods that can be used in var placeholders i.e. {{myvar|mymethod()}}. Components can have their
 	|									- own, local @methods, too.
-	|		@autoReprocess (arr) 		- array of structures that should auto-reprocess as component data written (dflt: ['output', 'attrs'] - 'conds'/'reps' also allowed)
+	|		@autoReprocess (arr) 		- array of structures ('output', 'attrs', 'conds', 'reps') that should auto-reprocess whenever component data written - or bool
+	|									  true for all (dflt: true)
 	|		@masterComponent (str)		- the name of the master component (dflt: 'master')
 	|		@routes (obj)				- a map of routes data, with keys denoting route IDs and values as objects with route config. See ::listenForRoutes() for more.
 	|		@reinsCaching (bool; arr)	- whether child components should be reinstated from cache rather than fresh when they are reinstated by a parent's reprocessed
@@ -85,7 +86,7 @@ window.Lucid = window.Lucid || (() => {
 			compsPath: '.',
 			masterComponent: 'master',
 			container: 'body',
-			autoReprocess: ['output', 'attrs'],
+			autoReprocess: true,
 			manualAttrs: false,
 			methods: {},
 			routes: {},
@@ -1213,10 +1214,10 @@ window.Lucid = window.Lucid || (() => {
 	--- */
 
 	proto.doAutoReprocess = function(comp, prop) {
-		this.autoReprocess.includes('conds') && comp.rc(null, prop);
-		this.autoReprocess.includes('attrs') && comp.ra(null, null, prop);
-		this.autoReprocess.includes('reps') && comp.rr(null, prop);
-		this.autoReprocess.includes('output') && comp.ro(null, prop);
+		(this.autoReprocess === true || this.autoReprocess.includes('conds')) && comp.rc();
+		(this.autoReprocess === true || this.autoReprocess.includes('attrs')) && comp.ra();
+		(this.autoReprocess === true || this.autoReprocess.includes('reps')) && comp.rr();
+		(this.autoReprocess === true || this.autoReprocess.includes('output')) && comp.ro();
 	}
 
 	/* ---
