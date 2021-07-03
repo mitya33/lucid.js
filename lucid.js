@@ -1210,10 +1210,9 @@ window.Lucid = window.Lucid || (() => {
 	/* ---
 	| AUTO-REPROCESS - auto-reprocess any construct types allowed by the @autoReprocess instantiation param array - output (template vars), attrs, conds and reps. Args:
 	|	@comp (obj)	- the component object.
-	|	@prop (?)	- if this came from the proxy setter, the property within the component's object that was changed
 	--- */
 
-	proto.doAutoReprocess = function(comp, prop) {
+	proto.doAutoReprocess = function(comp) {
 		(this.autoReprocess === true || this.autoReprocess.includes('conds')) && comp.rc();
 		(this.autoReprocess === true || this.autoReprocess.includes('attrs')) && comp.ra();
 		(this.autoReprocess === true || this.autoReprocess.includes('reps')) && comp.rr();
@@ -1231,7 +1230,7 @@ window.Lucid = window.Lucid || (() => {
 			get(obj, prop) { return typeof obj[prop] == 'object' && obj[prop] !== null ? new Proxy(obj[prop], outerThis.getProxyConfig(comp)) : obj[prop]; },
 			set(obj, prop, val) {
 				obj[prop] = val;
-				outerThis.doAutoReprocess(comp, prop);
+				outerThis.doAutoReprocess(comp);
 				return true;
 			}
 		};
