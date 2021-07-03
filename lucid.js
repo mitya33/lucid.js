@@ -31,7 +31,7 @@ window.Lucid = window.Lucid || (() => {
 			childCompName: /^[A-Z][A-Za-z\d\-]*$/,
 			childCompTags: /<([A-Z][A-Za-z\d\-]*)[^<>]*?>/g,
 			repOrCondChildCompSel: /\b([A-Z][A-Za-z\d\-]*)(?!=["\]])\b/g,
-			vars: /{{([^}\|]+)(?:\|(\w+)\((1|true)?\))?}}/g,
+			vars: /{{([^}\|]+?)(?:\|(\w+)\((1|true)?\))?}}/g,
 			complexType: /\[(?:object Object|function):(\d+)\]/,
 			compsFileCompMarker: /^<!-- ?COMPONENT (\w+) ?-->$/gm,
 			condOrRepSelNoReachIntoChildComp: /[A-Z][A-Za-z\d\-]* +[a-zA-Z]/,
@@ -39,7 +39,7 @@ window.Lucid = window.Lucid || (() => {
 			routeDataVars: /^\$rd:/,
 			dynamicCompJsBody: /(^[^{]+{|}$|^\([^\)]*\) *=> *)/g
 		};
-		regex.varsAsComments = new RegExp(regex.vars.source.replace('{{', '<!-- ?'+varIdentifier).replace('}}', ' ?-->').replace('^}', '^-'), 'g');
+		regex.varsAsComments = new RegExp(regex.vars.source.replace('{{', '<!-- ?'+varIdentifier).replace('}}', ' ?-->'), 'g');
 
 	/* ---
 	| CONSTRUCTOR - args:
@@ -77,7 +77,8 @@ window.Lucid = window.Lucid || (() => {
 			routeChanged: {},
 			routeFetched: {},
 			routeFetchError: {},
-			message: {}
+			message: {},
+			mutated: {}
 		};
 		this.fullyRenderedTracker = {};
 
@@ -1026,10 +1027,10 @@ window.Lucid = window.Lucid || (() => {
 
 	/* ---
 	| FIRE EVENT - listen for component event firing. Callbacks are passed the event name and called in the context of the component. Args:
-	|	@comp (obj; null) 	- the component object of the causal component, if there was one (some events fire at app-level, e.g. route change,
-	| 						  but we always bind from components, so in this case iterate over components to see who's listening.)
-	|	@evt (str)			- the event type (from ::events)
-	|	@dataN (?)			- one or more params to forward to the callback - basically, all args but @comp and @evt get forwarded
+	|	@comp (obj; null) 		- the component object of the causal component, if there was one (some events fire at app-level, e.g. route change,
+	| 						  	  but we always bind from components, so in this case iterate over components to see who's listening.)
+	|	@evt (str)				- the event type (from ::events)
+	|	@data1, @data2, ... (?)	- one or more successive args to forward to the callback - basically, all args but @comp and @evt get forwarded
 	--- */
 
 	proto.fireEvent = function(comp, evt) {
@@ -1210,9 +1211,10 @@ window.Lucid = window.Lucid || (() => {
 	/* ---
 	| AUTO-REPROCESS - auto-reprocess any construct types allowed by the @autoReprocess instantiation param array - output (template vars), attrs, conds and reps. Args:
 	|	@comp (obj)	- the component object.
+	|	@prop (?)	- if this came from the proxy setter, the property within the component's object that was changed
 	--- */
 
-	proto.doAutoReprocess = function(comp) {
+	proto.doAutoReprocess = function(comp, prop) {
 		(this.autoReprocess === true || this.autoReprocess.includes('conds')) && comp.rc();
 		(this.autoReprocess === true || this.autoReprocess.includes('attrs')) && comp.ra();
 		(this.autoReprocess === true || this.autoReprocess.includes('reps')) && comp.rr();
@@ -1230,7 +1232,8 @@ window.Lucid = window.Lucid || (() => {
 			get(obj, prop) { return typeof obj[prop] == 'object' && obj[prop] !== null ? new Proxy(obj[prop], outerThis.getProxyConfig(comp)) : obj[prop]; },
 			set(obj, prop, val) {
 				obj[prop] = val;
-				outerThis.doAutoReprocess(comp);
+				outerThis.doAutoReprocess(comp, prop);
+				outerThis.fireEvent(comp, 'mutated', obj, prop);
 				return true;
 			}
 		};
