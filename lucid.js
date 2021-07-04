@@ -268,11 +268,20 @@ window.Lucid = window.Lucid || (() => {
 			!this.compJsFuncs[name] && this.buildCompJS(parts.js ? parts.js[1] : null, comp);
 			this.compJsFuncs[name+'/'+compInstanceId](this);
 
-			//rendered (minus descendant components) - fire event - also fire route changed event for starting route. Any component listening in on route changed
-			//should be notified of starting route, but its JS runs after starting route established, hence fire manually here.
+			//rendered (minus descendant components) - fire event - also fire route changed event for starting route. Any component
+			//listening in on route changed should be notified of starting route, but its JS runs after starting route established,
+			//hence fire manually here.
 			this.fireEvent(comp, 'rendered');
 			this.fireEvent(comp, 'routeChanged');
 			const compAlias = comp;
+
+			//on initial vars parsing, if we found references to filter methods that didn't exist at that time, they may now; reprocess
+			//output and attrs
+			if (comp.unfoundFMethodsOnInitParse) {
+				comp.ro(null, null, null, comp.unfoundFMethodsOnInitParse);
+				comp.ra(null, null, null, comp.unfoundFMethodsOnInitParse);
+				delete comp.unfoundFMethodsOnInitParse;
+			}
 		
 			//render child components
 			await this.renderChildComps(comp);
@@ -513,19 +522,24 @@ window.Lucid = window.Lucid || (() => {
 	}
 
 	/* ---
-	| OUTPUT VARS - as with ::processConds(), but for output, i.e. variables in free-flowing output. Args:
+	| OUTPUT VARS - as with ::processConds(), but for free-flowing output (i.e. text nodes and comments). Args:
 	|	@comp (obj)		- the component object.
 	|	@sel (str)		- an optional selector targeting an element within which to process vars (else whole component DOM)
 	|	@dataProp (str)	- the name of the property within @comp's @data object that was changed, unless we're re/processing all output
+	|	@fMethods (arr)	- array of filter method names - act only on only nodes that reference one of these methods
 	--- */
 
-	proto.processOutput = function(comp, sel, dataProp) {
+	proto.processOutput = function(comp, sel, dataProp, fMethods) {
 
 		//textnodes/comments bindings
 		let context = !sel ? comp.DOM : comp.DOM.querySelector(sel);
 		for (let which of ['comment', 'text']) {
 			let walker = document.createTreeWalker(context, NodeFilter['SHOW_'+which.toUpperCase()], {acceptNode: node =>
-					!!((node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) && this.checkParentage(node, comp.DOM))
+					!!(
+						(node.varTmplt || new RegExp('^'+regex.varsAsComments.source+'$').test('<!--'+node.nodeValue+'-->')) &&
+						this.checkParentage(node, comp.DOM) &&
+						(!fMethods || new RegExp('\|('+fMethods.join('|')+')\(').test(node.nodeValue))
+					)
 				}),
 				nodes = [],
 				node;
@@ -552,10 +566,11 @@ window.Lucid = window.Lucid || (() => {
 	| ATTRIBUTE VARS - as with ::processConds(), but for attributes. Args:
 	|	@comp (obj)		- the component object
 	|	@attrType (str)	- for when reprocessing attrs manually; an attr name to target, otherwise all
-	|	@dataProp (?)	- if came from @comp's proxy setter, the property within @comp's @data object that was changed
+	|	@dataProp (?)	- see ::processOutput()
+	|	@fMethod (str)	- see ::processOutput()
 	--- */
 
-	proto.processAttrs = function(comp, attrType, dataProp) {
+	proto.processAttrs = function(comp, attrType, dataProp, fMethods) {
 
 		//get attrs
 		let walker = document.createTreeWalker(comp.DOM, NodeFilter.SHOW_ELEMENT, {
@@ -571,6 +586,8 @@ window.Lucid = window.Lucid || (() => {
 
 		//iterate and do parse vars...
 		for (let attr of attrs) {
+
+			if (fMethods && new RegExp('\|('+fMethods.join('|')+')\(').test(attr.value)) continue;
 
 			let tmplt;
 			if (attr.varTmplt)
@@ -877,8 +894,14 @@ window.Lucid = window.Lucid || (() => {
 				return fmFunc[symbols.fmCache].get(val);
 			})(fmFunc, comp);
 
-			//no data for swaps - retain placeholder
-			if (!pool) return match;
+			//no data for swaps or filter method not found? Retain placeholder. If the latter, and is initial stage, log that we
+			//need to re-parse output and attrs after component rendered, by which time filter method will exist (as component's
+			//JS will have run)
+			if (filterMethod && !fmFunc && stage == 'init') {
+				comp.unfoundFMethodsOnInitParse = comp.unfoundFMethodsOnInitParse || [];
+				comp.unfoundFMethodsOnInitParse.push(filterMethod);
+			}
+			if (!pool || (filterMethod && !fmFunc)) return match;
 
 			//is basic property reference...
 			if (!/[\.\[]/.test(varName)) {
